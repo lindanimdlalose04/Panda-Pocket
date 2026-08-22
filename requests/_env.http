@@ -1,0 +1,12 @@
+### Shared variables for the Panda Pocket request collection.
+### Rider and the VS Code REST Client both read @-declarations from the file
+### they are run in, so these are copied into each file rather than imported.
+
+@gateway   = http://localhost:5000
+@merchant  = http://localhost:5001
+@invoice   = http://localhost:5002
+@rate      = http://localhost:5003
+@settlement = http://localhost:5004
+
+### Health of the backing stores (day 1: Seq is the only one with an HTTP face)
+GET http://localhost:5341/health

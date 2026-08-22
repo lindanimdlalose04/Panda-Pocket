@@ -1,0 +1,96 @@
+# Panda Pocket local deployment
+#
+# Day 1 scope: data stores and logging only. Application services are added to
+# this file as they are built (Rate on day 2, Invoice and Gateway on day 3,
+# Merchant on day 4, Settlement on day 5).
+
+name: pandapocket
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Postgres: hosts merchant_db, invoice_db and settlement_db, one login role
+  # each. See infra/postgres/init.sql.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: pp-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_root_dev
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [pandapocket]
+
+  # ---------------------------------------------------------------------------
+  # MongoDB: rate tick history. Chosen over Postgres for this one workload
+  # because ticks are append-only, schema-light and read by time range, which is
+  # what makes the persistence polyglot rather than decorative.
+  # ---------------------------------------------------------------------------
+  mongo:
+    image: mongo:7
+    container_name: pp-mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: rate_svc
+      MONGO_INITDB_ROOT_PASSWORD: rate_pw_dev
+      MONGO_INITDB_DATABASE: rate_db
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [pandapocket]
+
+  # ---------------------------------------------------------------------------
+  # Seq: centralised structured logging. Every service ships Serilog events here
+  # stamped with X-Correlation-Id, which is what makes one payment traceable
+  # across four services.
+  #
+  # Inside the container Seq serves the UI and management API on port 80, and
+  # accepts log ingestion on 5341. Publishing 5341:80 therefore puts the UI on
+  # the conventional Seq port on the host. Services on the compose network ship
+  # their logs to http://seq directly and never use the published port.
+  #
+  # Two environment variables are mandatory or the container exits on start:
+  #   ACCEPT_EULA                  - licence acceptance
+  #   SEQ_FIRSTRUN_NOAUTHENTICATION - current Seq refuses to initialise unless
+  #     an admin password is supplied or authentication is explicitly declined.
+  #     This is a local demo log sink on a private compose network holding no
+  #     production data, and a login wall in front of the logging evidence would
+  #     only get in the way of the demo. A deployed instance would set
+  #     SEQ_FIRSTRUN_ADMINPASSWORD instead.
+  # ---------------------------------------------------------------------------
+  seq:
+    image: datalust/seq:latest
+    container_name: pp-seq
+    environment:
+      ACCEPT_EULA: "Y"
+      SEQ_FIRSTRUN_NOAUTHENTICATION: "true"
+    ports:
+      - "5341:80"
+    volumes:
+      - seqdata:/data
+    networks: [pandapocket]
+
+volumes:
+  pgdata:
+  mongodata:
+  seqdata:
+
+networks:
+  pandapocket:
+    driver: bridge
+    name: pandapocket-net

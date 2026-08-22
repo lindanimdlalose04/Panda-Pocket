@@ -1,0 +1,21 @@
+Panda Pocket - database-per-service isolation proof
+Captured: 2026-08-22 17:40 UTC
+Postgres: postgres (PostgreSQL) 16.15
+
+
+=== merchant_svc ===
+  CONNECTED  merchant_db   -> merchant_svc@merchant_db
+  REFUSED    invoice_db   -> psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  permission denied for database "invoice_db"
+  REFUSED    settlement_db   -> psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  permission denied for database "settlement_db"
+
+=== invoice_svc ===
+  REFUSED    merchant_db   -> psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  permission denied for database "merchant_db"
+  CONNECTED  invoice_db   -> invoice_svc@invoice_db
+  REFUSED    settlement_db   -> psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  permission denied for database "settlement_db"
+
+=== settlement_svc ===
+  REFUSED    merchant_db   -> psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  permission denied for database "merchant_db"
+  REFUSED    invoice_db   -> psql: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: FATAL:  permission denied for database "invoice_db"
+  CONNECTED  settlement_db   -> settlement_svc@settlement_db
+
+Expected: one CONNECTED and two REFUSED per role.

@@ -1,0 +1,25 @@
+# .NET build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+artifacts/
+
+# IDE
+.vs/
+.idea/
+.vscode/
+*.DotSettings.user
+
+# Local secrets (init.sql credentials are committed on purpose; real ones never)
+appsettings.Development.local.json
+*.env.local
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Docs build output
+docs/**/*.bak
