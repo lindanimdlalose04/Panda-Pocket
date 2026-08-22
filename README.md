@@ -32,6 +32,27 @@ dotnet build PandaPocket.sln
 `global.json` pins the SDK to 8.0.x. Without it a machine with .NET 10
 installed silently builds against the newer SDK.
 
+## Inspecting the databases
+
+pgAdmin 4 connects to the containerised Postgres like any other server. Register
+one connection per service role, since no role can see another's database:
+
+| Field    | Value                                                |
+|----------|------------------------------------------------------|
+| Host     | `localhost`                                          |
+| Port     | `5432`                                               |
+| Database | `merchant_db` / `invoice_db` / `settlement_db`       |
+| Username | `merchant_svc` / `invoice_svc` / `settlement_svc`    |
+| Password | see `infra/postgres/init.sql`                        |
+
+Set **Maintenance database** to the same value as Database. pgAdmin defaults it
+to `postgres`, which a service role cannot connect to, and the resulting error
+looks like a bad password rather than the isolation working as designed.
+
+pgAdmin bundles its own `psql` at
+`%LOCALAPPDATA%\Programs\pgAdmin 4untime\psql.exe`, which the verification
+script finds automatically.
+
 ## Proving database isolation
 
 One Postgres container hosts three databases with one login role each. The
@@ -48,8 +69,19 @@ or on Windows:
 ./infra/verify-isolation.ps1
 ```
 
-Each role connects to exactly one database and is refused the other two. The
-refusals are the evidence.
+Each role connects to exactly one database and is refused the other two, and
+the script asserts that rather than leaving it to the reader. The refusals are
+the evidence:
+
+```
+FATAL:  permission denied for database "merchant_db"
+DETAIL:  User does not have CONNECT privilege.
+```
+
+The script prefers a real TCP connection from the host and falls back to
+`docker exec`. Prefer the TCP path when demonstrating: the error names the
+CONNECT privilege explicitly, and a client crossing the network boundary is a
+more honest demonstration than one already inside the container.
 
 ## Layout
 

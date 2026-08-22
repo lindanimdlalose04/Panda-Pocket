@@ -80,12 +80,37 @@ that answers every UI request with a Seq-formatted 404, which looks like a
 broken install rather than a port mismatch. Services on the compose network
 ship to `http://seq` and never touch the published port.
 
+**Postgres stays in the container, and the host install is a red herring.**
+`C:\Program Files\PostgreSQL` on this machine contains a `data` directory
+and nothing else: no `bin`, no server, no client, no registered service. The
+cluster was created in June 2024, last ran on 28 January 2026, and was then
+uninstalled, with the uninstaller leaving the data directory behind as it is
+designed to. There is therefore no local Postgres to use even if it were
+wanted, and it is not wanted: the deployment criterion rewards a system that
+comes up from a clean clone with `docker compose up`, and moving the database
+onto the host would mean running `init.sql` by hand and losing exactly the
+automated bootstrap that makes the isolation demo reproducible.
+
+**The isolation proof runs over TCP from the host, not inside the container.**
+pgAdmin 4 was already installed under `%LOCALAPPDATA%\Programs`, which is why a
+check of `C:\Program Files` missed it, and it bundles psql 16.3 against a 16.15
+server. Running the proof through that client rather than through `docker exec`
+improves the demo twice over. The refusal message gains a second line,
+`DETAIL: User does not have CONNECT privilege`, which names the exact privilege
+`init.sql` revokes; and a client crossing the container network boundary is a
+more honest demonstration of isolation than one already inside the container.
+The scripts auto-detect a host psql and fall back to `docker exec`, so they run
+anywhere. They also now assert the expected outcome and exit non-zero on
+surprise, rather than printing results for a human to eyeball.
+
 ### Environment notes
 
 - Docker Desktop installed via winget; Docker CE 29.7.2.
 - .NET 8.0.302 SDK already present.
-- Not yet done: DBeaver and draw.io desktop. Neither blocks day 2, and DBeaver
-  is only needed for manual inspection that `docker exec ... psql` also covers.
+- pgAdmin 4 (release 8) already present, with psql, pg_dump, pg_dumpall and
+  pg_restore bundled in its `runtime` directory.
+- draw.io desktop already present, so nothing outstanding for day 8.
+- DBeaver not installed and not needed; pgAdmin covers it.
 
 ### Done when
 
@@ -112,7 +137,8 @@ Docker Desktop failed to start on first launch with "initializing Inference
 manager: remove .../run/dockerInference: The file cannot be accessed by the
 system". This machine had a previous Docker Desktop installation, and its
 uninstall left orphaned AF_UNIX socket reparse points in
-`%LOCALAPPDATA%\Dockerun` dated December 2025. Windows cannot delete a
+`%LOCALAPPDATA%\Docker
+un` dated December 2025. Windows cannot delete a
 reparse point whose backing kernel object is gone, so the Docker backend aborted
 at startup because it could not clear the socket before binding it. Renaming the
 whole `run` directory worked where deleting the individual files did not; Docker
