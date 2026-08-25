@@ -17,11 +17,28 @@ docker compose up -d
 That brings up the three backing stores. Application services are added to the
 compose file as they are built.
 
-| Service  | URL                     | Credentials                     |
-|----------|-------------------------|---------------------------------|
-| Postgres | `localhost:5432`        | see `infra/postgres/init.sql`   |
-| MongoDB  | `localhost:27017`       | `rate_svc` / `rate_pw_dev`      |
+| Service  | URL                     | Credentials                       |
+|----------|-------------------------|-----------------------------------|
+| Postgres | `localhost:5432`        | see `infra/postgres/init.sql`     |
+| MongoDB  | `localhost:27018`       | `rate_svc` / `rate_pw_dev`        |
 | Seq      | http://localhost:5341   | none (auth disabled, see compose) |
+| Rate API | http://localhost:5003   | none yet (API keys arrive day 4)  |
+
+MongoDB is published on **27018**, not the usual 27017, because a local MongoDB
+service on the development machine already holds that port and a host process
+would otherwise reach the wrong server. Inside the compose network it is still
+`mongo:27017`.
+
+### If Docker will not start
+
+```powershell
+./infra/fix-docker-sockets.ps1
+```
+
+Docker Desktop leaves orphaned socket files behind when it does not shut down
+cleanly, and then refuses to start, naming a different socket each attempt.
+Windows cannot delete those files. The script clears them all in one pass and
+restarts the engine. Worth running before the demo.
 
 Then build:
 
@@ -50,7 +67,8 @@ to `postgres`, which a service role cannot connect to, and the resulting error
 looks like a bad password rather than the isolation working as designed.
 
 pgAdmin bundles its own `psql` at
-`%LOCALAPPDATA%\Programs\pgAdmin 4untime\psql.exe`, which the verification
+`%LOCALAPPDATA%\Programs\pgAdmin 4
+untime\psql.exe`, which the verification
 script finds automatically.
 
 ## Proving database isolation
@@ -100,6 +118,32 @@ PandaPocket.sln
 ├─ requests/                  .http files, doubling as API documentation
 ├─ docs/                      diagrams and report
 └─ docker-compose.yml
+```
+
+## The Rate service
+
+```bash
+curl http://localhost:5003/api/rates/BTCZAR
+curl http://localhost:5003/health
+```
+
+Swagger UI is at http://localhost:5003/swagger, and `requests/rate.http` holds
+the full set of calls with commentary.
+
+Prices come from a local geometric Brownian motion simulator rather than an
+external exchange, so a demo cannot be broken by a third party outage or rate
+limit, while still being a genuine dependency for the day 6 circuit breaker.
+Each pair has its own drift and volatility, so USDTZAR behaves like the
+stablecoin it is while BTCZAR wanders.
+
+Worth demonstrating: stop MongoDB and the service degrades rather than failing.
+
+```bash
+docker compose stop mongo
+curl http://localhost:5003/api/rates/BTCZAR   # 200, served from memory
+curl http://localhost:5003/health             # 503, names mongodb as the failure
+curl http://localhost:5003/api/rates/BTCZAR/history  # 503 with Retry-After
+docker compose start mongo                    # recovers on its own, no restart
 ```
 
 ## Design notes

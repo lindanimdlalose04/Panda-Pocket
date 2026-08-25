@@ -43,8 +43,13 @@ services:
       MONGO_INITDB_ROOT_USERNAME: rate_svc
       MONGO_INITDB_ROOT_PASSWORD: rate_pw_dev
       MONGO_INITDB_DATABASE: rate_db
+    # Published on 27018, not 27017. This machine runs a local MongoDB service
+    # of its own, and two servers competing for 27017 means a host process
+    # silently reaches whichever bound first. Publishing elsewhere leaves the
+    # local install alone and removes the ambiguity. Nothing inside the compose
+    # network is affected: services reach this container as mongo:27017.
     ports:
-      - "27017:27017"
+      - "27018:27017"
     volumes:
       - mongodata:/data/db
     healthcheck:
@@ -83,6 +88,44 @@ services:
       - "5341:80"
     volumes:
       - seqdata:/data
+    networks: [pandapocket]
+
+  # ---------------------------------------------------------------------------
+  # Rate: ZAR conversion quotes and tick history.
+  #
+  # Reached by other services as http://rate-service:8080. That name is resolved
+  # by Docker's embedded DNS on the compose network, which is this system's
+  # service discovery mechanism: Ocelot routes to the service name, never to a
+  # container IP, so containers can be replaced without reconfiguring anything.
+  #
+  # The build context is the repository root because this project references
+  # src/Shared/Contracts. See the comment at the top of its Dockerfile.
+  # ---------------------------------------------------------------------------
+  rate-service:
+    build:
+      context: .
+      dockerfile: src/Services/Rate.Api/Dockerfile
+    container_name: pp-rate
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: 8080
+      # Inside the network this is the container port 27017, not the published
+      # 27018. Compose DNS resolves "mongo" to the container.
+      Mongo__ConnectionString: mongodb://rate_svc:rate_pw_dev@mongo:27017/?authSource=admin
+      Seq__ServerUrl: http://seq:5341
+    ports:
+      - "5003:8080"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      seq:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks: [pandapocket]
 
 volumes:

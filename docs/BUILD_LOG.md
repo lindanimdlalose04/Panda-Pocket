@@ -144,3 +144,132 @@ at startup because it could not clear the socket before binding it. Renaming the
 whole `run` directory worked where deleting the individual files did not; Docker
 recreated it cleanly on the next start. Recorded here because the same symptom
 would recur if Docker Desktop is ever reinstalled before the demo.
+
+---
+
+## Day 2, Sunday 23 August 2026 — Rate service
+
+### Built
+
+- Rate service end to end: Mongo repository with the compound index, a
+  geometric Brownian motion price simulator, a background tick generator with
+  startup backfill, three endpoints, Swagger, Serilog to Seq, a health check
+  that probes MongoDB, and a Dockerfile.
+- `rate-service` added to compose, reachable as `http://rate-service:8080` on
+  the compose network and published on 5003.
+- Correlation id middleware in `Shared/Contracts`, so the three services still
+  to be written inherit it.
+- `requests/rate.http`, doubling as API documentation.
+- `infra/fix-docker-sockets.ps1`, see below.
+
+### Decisions
+
+**The backfill exists so the history endpoint can be demonstrated.** On first
+start, if the ticks collection is empty, the generator walks the simulation from
+24 hours ago to now in one-minute steps and bulk inserts the result: 1 440 ticks
+per pair. Without it `/api/rates/{pair}/history` returns an empty array until
+the service has been running for hours, the compound index has nothing to work
+against, and the endpoint cannot be shown. The backfill uses the same
+mathematics as the live generator, so history and live data form one continuous
+series rather than meeting at a visible seam.
+
+**A restart resumes from the last stored rate rather than the configured start
+price.** Otherwise every container restart puts a discontinuity in the series,
+which looks like a bug during a demo. Verified: the container picked up from
+1 784 878 where the previous run left off, instead of resetting to 1 800 000.
+
+**USDTZAR is configured with near-zero volatility.** It is a stablecoin, so one
+blanket volatility figure applied to all three pairs would be wrong. Over the
+same 24 hours BTCZAR moved thousands of rand and USDTZAR moved two cents. The
+per-pair configuration is what makes the simulation defensible rather than
+decorative.
+
+**A fixed random seed, offset per pair.** The seed makes a demo reproducible;
+the per-pair offset stops all three pairs walking in lockstep, which would
+otherwise produce three identically shaped lines.
+
+**Health checks and correlation middleware were pulled forward from day 6.**
+Both get copied into three more services, so building them properly now costs
+about half an hour and removes work from the heaviest day of the week.
+
+**Mongo driver timeouts lowered from 30 seconds to 3.** With MongoDB stopped,
+the default settings made the health check take 60 seconds to report Unhealthy
+and made the history endpoint hang rather than fail. A health check that takes a
+minute to report a failure is not a health check, and a demo where everyone
+watches a spinner is not a demo. Now the failure surfaces in about six seconds.
+
+**Rate degrades rather than dying when MongoDB is unavailable.** The first
+version let the background service throw, and .NET's default
+`BackgroundServiceExceptionBehavior.StopHost` took the whole process down with
+it. That is the wrong trade: the rate book is seeded from configuration and the
+quote endpoint needs no database at all, so losing history should not mean
+losing the service. Initialisation now retries with a capped backoff, quotes
+keep returning 200, `/health` reports 503, and history returns a 503 with a
+`Retry-After` header rather than a 500. When MongoDB returns, the service
+recovers on its own with no restart. This behaviour is worth demonstrating in
+its own right and it is the same failure philosophy the day 6 circuit breaker
+will apply to the Invoice to Rate call.
+
+### Two bugs worth recording
+
+**Middleware ordering silently cost the tracing demo.** `UseSerilogRequestLogging`
+was registered before `UseCorrelationId`, so the correlation property was pushed
+into the log context inside the request-logging middleware and had already been
+popped by the time that middleware wrote its summary line. Everything appeared
+to work: handler logs carried the correlation id. But the single most useful
+line, the one carrying method, path, status code and elapsed time, did not. The
+order is now correlation first, request logging second.
+
+**Catching `MongoException` was not enough.** A server selection timeout, which
+is what "the database is down" actually looks like, surfaces as
+`System.TimeoutException`, which does not derive from `MongoException`. The
+history endpoint returned 500 until the catch was widened to both.
+
+### The port conflict
+
+Rate could not authenticate against MongoDB when run locally, while the same
+credentials worked from inside the container. The cause was a **local MongoDB
+service running on this machine** and also listening on 27017, so a host process
+connecting to `localhost:27017` reached the local server, which has no
+`rate_svc` user. The container's published port was moved to **27018** rather
+than stopping the local service, since that leaves the developer's own software
+alone and removes the ambiguity permanently. Nothing inside the compose network
+changed: services still reach MongoDB as `mongo:27017`.
+
+This is the second instance of the same pattern on this machine, after the
+leftover PostgreSQL data directory found on day 1. Worth checking what else is
+listening before assuming a configuration error.
+
+### Docker Desktop keeps orphaning sockets
+
+Docker failed to start twice more, each time naming a different socket:
+`sailor-ingest.sock`, then `docker-secrets-engine/engine.sock`. The cause is the
+one identified on day 1: unclean shutdown leaves AF_UNIX reparse points that
+Windows cannot delete, and the backend aborts at whichever it reaches first.
+Fixing them one at a time is whack-a-mole, so `infra/fix-docker-sockets.ps1` now
+finds every orphaned socket across all of Docker's runtime directories, renames
+the directories holding them, restarts Docker and waits for the engine. Run it
+if Docker will not start, and run it before the demo.
+
+### Done when
+
+- [x] Rate runs as a container alongside the data stores, reporting healthy
+- [x] Its logs appear in Seq at `localhost:5341`, filterable by `Service = 'Rate'`
+- [x] A supplied `X-Correlation-Id` is echoed and stamped on the request summary
+      line in Seq, alongside status code and elapsed time
+- [x] All three endpoints return real data; unknown pair gives 404, inverted
+      range gives 400
+- [x] History returns a populated series, 1 440 backfilled points per pair plus
+      live ticks, as one continuous series
+- [x] `/health` reports Unhealthy within seconds when MongoDB is stopped, and
+      recovers automatically when it returns
+- [x] Swagger UI and the OpenAPI document are served by the running container
+
+### Verified state at end of day 2
+
+```
+pp-postgres   running (healthy)   5432->5432    PostgreSQL 16.15
+pp-mongo      running (healthy)   27018->27017  MongoDB 7
+pp-seq        running             5341->80      Seq 2026.1.17114
+pp-rate       running (healthy)   5003->8080    Rate service
+```

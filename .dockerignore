@@ -1,0 +1,13 @@
+# Keep build output out of the Docker context. Without this the context upload
+# includes every bin/ and obj/ directory in the solution, which is slow and can
+# poison a container build with host-built artefacts targeting a different
+# runtime identifier.
+**/bin/
+**/obj/
+**/.vs/
+**/.idea/
+.git/
+.gitignore
+docs/
+requests/
+*.md

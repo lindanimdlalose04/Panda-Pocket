@@ -1,0 +1,88 @@
+### Panda Pocket - Rate service
+###
+### Executable from Rider and from the VS Code REST Client extension.
+### These requests are kept in the repository deliberately: they are
+### version-controlled examples that double as API documentation and cannot
+### drift away from the code the way an exported Postman collection can.
+###
+### The service is published on 5003. Once the gateway exists (day 3) the same
+### calls route through http://localhost:5000.
+
+@rate = http://localhost:5003
+
+### ---------------------------------------------------------------------------
+### Health. Probes MongoDB rather than merely confirming the process is alive,
+### so it reports Unhealthy with a 503 when the database is unreachable.
+### Try it: docker compose stop mongo, then call this again.
+### ---------------------------------------------------------------------------
+GET {{rate}}/health
+
+### ---------------------------------------------------------------------------
+### Current rate for every configured pair. Served from memory, not MongoDB.
+### ---------------------------------------------------------------------------
+GET {{rate}}/api/rates
+
+### ---------------------------------------------------------------------------
+### One pair. This is the call the Invoice service makes on the critical path
+### when creating an invoice, and the call that gets a circuit breaker in front
+### of it on day 6.
+###
+### The asOf field matters: when the breaker is open and Invoice falls back to a
+### cached rate, asOf is how it knows and reports how stale that rate is.
+### ---------------------------------------------------------------------------
+GET {{rate}}/api/rates/BTCZAR
+
+###
+GET {{rate}}/api/rates/ETHZAR
+
+### USDTZAR is configured with near-zero volatility because it is a stablecoin.
+### Call it repeatedly and it barely moves, while BTCZAR wanders. That is a
+### configured property of each pair, not one blanket simulation.
+GET {{rate}}/api/rates/USDTZAR
+
+### ---------------------------------------------------------------------------
+### Unknown pair returns 404, not a zero rate. Returning zero would let Invoice
+### compute an infinite crypto amount from a typo in an asset name, which is
+### exactly the kind of failure that should be loud rather than silent.
+### ---------------------------------------------------------------------------
+GET {{rate}}/api/rates/DOGEZAR
+
+### ---------------------------------------------------------------------------
+### Tick history, served from MongoDB. Newest first. Defaults to the last hour
+### when no range is supplied, and is capped at 5000 points regardless of the
+### window asked for, so a careless request cannot pull the whole collection.
+###
+### This read is "one pair, newest first, within a time range", which is exactly
+### a prefix match on the compound index { pair: 1, ts: -1 } followed by an
+### ordered range scan. Mongo satisfies both the filter and the sort from the
+### index, with no in-memory sort stage.
+### ---------------------------------------------------------------------------
+GET {{rate}}/api/rates/BTCZAR/history
+
+### An explicit window. Points from the startup backfill carry
+### source "gbm-backfill"; live ones carry "gbm-simulator". The two form one
+### continuous series rather than meeting at a visible seam.
+GET {{rate}}/api/rates/BTCZAR/history?from=2026-08-24T00:00:00Z&to=2026-08-26T00:00:00Z
+
+### An inverted range returns 400 rather than an empty list, because silently
+### returning nothing hides a caller's bug.
+GET {{rate}}/api/rates/BTCZAR/history?from=2026-08-25T10:00:00Z&to=2026-08-25T09:00:00Z
+
+### ---------------------------------------------------------------------------
+### Correlation id. Supply one and it is echoed on the response and stamped on
+### every log line the request produces. Filter Seq by it at
+### http://localhost:5341 to see the request summary with its status code and
+### elapsed time. From day 3 onwards the same id spans several services.
+###
+### Omit the header and the service mints one, so a request made directly from
+### this file still produces traceable logs instead of a gap.
+### ---------------------------------------------------------------------------
+GET {{rate}}/api/rates/BTCZAR
+X-Correlation-Id: manual-trace-001
+
+### ---------------------------------------------------------------------------
+### OpenAPI document. Swagger UI is at {{rate}}/swagger and is deliberately
+### enabled outside development, because a running container that produces its
+### own specification is better evidence than a JSON file committed by hand.
+### ---------------------------------------------------------------------------
+GET {{rate}}/swagger/v1/swagger.json

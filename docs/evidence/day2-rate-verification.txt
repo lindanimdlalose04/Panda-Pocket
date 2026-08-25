@@ -1,0 +1,43 @@
+Panda Pocket - Rate service verification (day 2)
+Captured: 2026-08-25 14:04 UTC
+
+=== containers ===
+NAME          STATE     STATUS                        PORTS
+pp-mongo      running   Up About a minute (healthy)   0.0.0.0:27018->27017/tcp, [::]:27018->27017/tcp
+pp-postgres   running   Up 25 minutes (healthy)       0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp
+pp-rate       running   Up 2 minutes (healthy)        0.0.0.0:5003->8080/tcp, [::]:5003->8080/tcp
+pp-seq        running   Up 25 minutes                 0.0.0.0:5341->80/tcp, [::]:5341->80/tcp
+
+=== GET /health ===
+{
+  "status": "Healthy",
+  "totalDurationMs": 10,
+  "checks": [
+    {
+      "name": "mongodb",
+      "status": "Healthy",
+      "durationMs": 1.7,
+      "error": null
+    }
+  ]
+}
+=== GET /api/rates ===
+[{"pair":"BTCZAR","rate":1781458.62,"asOf":"2026-08-25T14:04:32.4703097Z"},{"pair":"ETHZAR","rate":70645.65,"asOf":"2026-08-25T14:04:32.5017282Z"},{"pair":"USDTZAR","rate":18.52,"asOf":"2026-08-25T14:04:32.5038918Z"}]
+
+=== GET /api/rates/BTCZAR ===
+{"pair":"BTCZAR","rate":1781458.62,"asOf":"2026-08-25T14:04:32.4703097Z"}
+
+=== GET /api/rates/DOGEZAR (unknown pair) ===
+{"type":"https://tools.ietf.org/html/rfc9110#section-15.5.5","title":"Unknown pair","status":404,"detail":"No rate is published for pair 'DOGEZAR'."}
+
+=== GET /api/rates/BTCZAR/history (counts by source) ===
+count: 1521
+sources: {'gbm-simulator': 81, 'gbm-backfill': 1440}
+newest: {'rate': 1781458.62, 'ts': '2026-08-25T14:04:32.47Z', 'source': 'gbm-simulator'}
+oldest: {'rate': 1797969.71, 'ts': '2026-08-24T13:44:28.815Z', 'source': 'gbm-backfill'}
+
+=== degradation: mongo stopped ===
+  /health          -> HTTP 503 Unhealthy in ~6s (driver timeouts lowered from 30s to 3s)
+  /api/rates/BTCZAR-> HTTP 200, served from the in-memory rate book
+  /history         -> HTTP 503 with Retry-After: 10
+  recovery         -> automatic on mongo returning, no container restart

@@ -6,4 +6,15 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+
+  <!-- The correlation middleware lives here so all four services inherit it.
+       That needs the ASP.NET Core shared framework, which a plain classlib
+       does not reference by default. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Serilog" Version="4.4.0" />
+  </ItemGroup>
+
 </Project>
