@@ -1,0 +1,62 @@
+{
+  "//": [
+    "Ocelot routing for Panda Pocket.",
+    "",
+    "Downstream hosts are Docker Compose SERVICE NAMES, not IP addresses and not",
+    "localhost. Docker's embedded DNS resolves 'invoice-service' to whichever",
+    "container currently holds that name on the pandapocket network. That is this",
+    "system's service discovery: containers can be stopped, rebuilt and replaced",
+    "with a different IP and the gateway needs no reconfiguration.",
+    "",
+    "This file is the deployed truth. ocelot.Development.json overrides the hosts",
+    "with localhost and published ports for running the gateway outside Docker.",
+    "",
+    "Rate limiting and the API key authentication handler are added on days 4 and 6."
+  ],
+
+  "Routes": [
+    {
+      "//": "Invoice collection: create and list.",
+      "DownstreamPathTemplate": "/api/invoices",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "invoice-service", "Port": 8080 } ],
+      "UpstreamPathTemplate": "/api/invoices",
+      "UpstreamHttpMethod": [ "GET", "POST" ]
+    },
+    {
+      "//": "Everything under an invoice: read, payments, cancel, history.",
+      "DownstreamPathTemplate": "/api/invoices/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "invoice-service", "Port": 8080 } ],
+      "UpstreamPathTemplate": "/api/invoices/{everything}",
+      "UpstreamHttpMethod": [ "GET", "POST" ]
+    },
+    {
+      "//": "Rates are exposed through the gateway so the checkout page can show a live price without a second origin.",
+      "DownstreamPathTemplate": "/api/rates",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "rate-service", "Port": 8080 } ],
+      "UpstreamPathTemplate": "/api/rates",
+      "UpstreamHttpMethod": [ "GET" ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/rates/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "rate-service", "Port": 8080 } ],
+      "UpstreamPathTemplate": "/api/rates/{everything}",
+      "UpstreamHttpMethod": [ "GET" ]
+    }
+  ],
+
+  "GlobalConfiguration": {
+    "BaseUrl": "http://localhost:5000",
+
+    "//RequestIdKey": [
+      "Ocelot generates a request id under this header when one is absent and",
+      "propagates it downstream. It is pointed at the same header the services",
+      "already use, so the gateway becomes the place correlation ids originate",
+      "and every service downstream sees an id that is already present."
+    ],
+    "RequestIdKey": "X-Correlation-Id"
+  }
+}

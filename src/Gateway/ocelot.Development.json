@@ -1,0 +1,51 @@
+{
+  "//": [
+    "Development overrides for running the gateway outside Docker.",
+    "",
+    "Compose service names only resolve on the compose network, so a gateway",
+    "started with 'dotnet run' cannot reach 'invoice-service'. This file repoints",
+    "the same routes at localhost and the published ports.",
+    "",
+    "The routes are repeated in full rather than patched. .NET configuration",
+    "merges JSON arrays by index, so a partial override would silently depend on",
+    "the two files keeping their routes in the same order. Repeating the array",
+    "makes the override total and obvious; if the two drift apart, the failure is",
+    "a routing 404 rather than a request quietly going to the wrong service."
+  ],
+
+  "Routes": [
+    {
+      "DownstreamPathTemplate": "/api/invoices",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5002 } ],
+      "UpstreamPathTemplate": "/api/invoices",
+      "UpstreamHttpMethod": [ "GET", "POST" ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/invoices/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5002 } ],
+      "UpstreamPathTemplate": "/api/invoices/{everything}",
+      "UpstreamHttpMethod": [ "GET", "POST" ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/rates",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5003 } ],
+      "UpstreamPathTemplate": "/api/rates",
+      "UpstreamHttpMethod": [ "GET" ]
+    },
+    {
+      "DownstreamPathTemplate": "/api/rates/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5003 } ],
+      "UpstreamPathTemplate": "/api/rates/{everything}",
+      "UpstreamHttpMethod": [ "GET" ]
+    }
+  ],
+
+  "GlobalConfiguration": {
+    "BaseUrl": "http://localhost:5000",
+    "RequestIdKey": "X-Correlation-Id"
+  }
+}

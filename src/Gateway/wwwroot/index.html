@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Panda Pocket</title>
+  <style>
+    :root {
+      --bg: #0f1115; --panel: #171a21; --line: #262b36;
+      --ink: #e8eaed; --muted: #9aa4b2; --accent: #4ade80;
+      --warn: #fbbf24; --bad: #f87171; --info: #60a5fa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px; background: var(--bg); color: var(--ink);
+      font: 15px/1.5 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+    }
+    header { max-width: 1100px; margin: 0 auto 20px; }
+    h1 { margin: 0 0 4px; font-size: 22px; font-weight: 650; }
+    .sub { color: var(--muted); font-size: 13px; }
+    .wrap { max-width: 1100px; margin: 0 auto; display: grid; gap: 18px; grid-template-columns: 360px 1fr; }
+    @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; } }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+    .card h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    label { display: block; margin: 10px 0 4px; font-size: 13px; color: var(--muted); }
+    input, select, button {
+      width: 100%; padding: 9px 10px; border-radius: 7px;
+      border: 1px solid var(--line); background: #0d0f14; color: var(--ink); font: inherit;
+    }
+    button {
+      margin-top: 14px; background: var(--accent); color: #06240f;
+      font-weight: 650; border: none; cursor: pointer;
+    }
+    button:hover { filter: brightness(1.08); }
+    button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+    th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+    td.mono, .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+    .pill { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .Pending { background: #1e3a5f; color: var(--info); }
+    .Underpaid { background: #4a3410; color: var(--warn); }
+    .Paid, .Settled { background: #14361f; color: var(--accent); }
+    .Expired, .Cancelled { background: #3d1d1d; color: var(--bad); }
+    .rates { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 4px; }
+    .rate { flex: 1; min-width: 120px; background: #0d0f14; border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+    .rate .p { color: var(--muted); font-size: 11px; }
+    .rate .v { font-size: 16px; font-weight: 650; font-family: ui-monospace, Consolas, monospace; }
+    #log { margin-top: 10px; font-size: 12px; min-height: 18px; }
+    .ok { color: var(--accent); } .err { color: var(--bad); } .note { color: var(--muted); }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .row > * { flex: 1; }
+    .countdown { font-family: ui-monospace, Consolas, monospace; }
+    .expiring { color: var(--warn); }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Panda Pocket</h1>
+  <div class="sub">
+    Merchant crypto payment gateway. Every call on this page goes through the
+    API gateway on port 5000, never directly to a service.
+  </div>
+</header>
+
+<div class="wrap">
+
+  <div>
+    <div class="card">
+      <h2>Live rates</h2>
+      <div class="rates" id="rates"><span class="note">loading…</span></div>
+      <div class="note mono" id="ratesAsOf"></div>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <h2>Create invoice</h2>
+      <label for="amount">Amount (ZAR)</label>
+      <input id="amount" type="number" value="250" min="1" step="0.01">
+
+      <label for="reference">Your reference</label>
+      <input id="reference" type="text" value="">
+
+      <label for="asset">Asset</label>
+      <select id="asset">
+        <option value="BTC">BTC</option>
+        <option value="ETH">ETH</option>
+        <option value="USDT">USDT</option>
+      </select>
+
+      <button onclick="createInvoice()">Create invoice</button>
+      <button class="ghost" onclick="refresh()">Refresh list</button>
+      <div id="log"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Invoices</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Reference</th><th>Amount</th><th>Crypto</th>
+          <th>Status</th><th>Expires in</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        <tr><td colspan="6" class="note">loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+// Same origin: the gateway serves this page and routes the API, so no CORS and
+// no hard-coded host. Opening the gateway on any machine gives a working client.
+const API = '';
+
+const log = (msg, cls = 'note') => {
+  document.getElementById('log').innerHTML = `<span class="${cls}">${msg}</span>`;
+};
+
+const money = n => 'R' + Number(n).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+async function createInvoice() {
+  const reference = document.getElementById('reference').value.trim()
+    || 'ORDER-' + Date.now().toString().slice(-6);
+
+  const body = {
+    amountZar: Number(document.getElementById('amount').value),
+    reference,
+    asset: document.getElementById('asset').value
+  };
+
+  try {
+    const res = await fetch(`${API}/api/invoices`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (res.status === 201) {
+      // The correlation id the gateway minted is echoed back, so it can be
+      // shown here and pasted straight into Seq to trace this exact request.
+      const cid = res.headers.get('X-Correlation-Id') || 'n/a';
+      log(`Created ${data.reference}: ${data.cryptoAmount} ${data.asset} at ${money(data.lockedRate)}. Correlation ${cid}`, 'ok');
+      document.getElementById('reference').value = '';
+    } else if (res.status === 409) {
+      log(`${data.title}: ${data.detail}`, 'err');
+    } else if (res.status === 503) {
+      log(`${data.title}: ${data.detail}`, 'err');
+    } else {
+      log(`${res.status}: ${data.detail || data.title || 'Request failed'}`, 'err');
+    }
+  } catch (e) {
+    log('Gateway unreachable: ' + e.message, 'err');
+  }
+
+  refresh();
+}
+
+async function pay(id, cryptoAmount, shortPay) {
+  // A random hash per click, because the unique constraint on tx_hash rejects a
+  // repeat. Use "Replay" to send a hash that has already been recorded.
+  const txHash = 'tx-' + Math.random().toString(16).slice(2, 12);
+  const amount = shortPay ? +(cryptoAmount * 0.5).toFixed(8) : cryptoAmount;
+
+  const res = await fetch(`${API}/api/invoices/${id}/payments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ txHash, amountCrypto: amount })
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  if (res.ok) log(`Paid ${amount}. Invoice is now ${data.status}.`, 'ok');
+  else if (res.status === 422) log(`422 Underpayment: ${data.detail}`, 'err');
+  else if (res.status === 410) log(`410 Gone: ${data.detail}`, 'err');
+  else if (res.status === 409) log(`409 ${data.title}: ${data.detail}`, 'err');
+  else log(`${res.status}: ${data.detail || data.title}`, 'err');
+
+  window.lastTxHash = txHash;
+  refresh();
+}
+
+async function replay(id) {
+  if (!window.lastTxHash) { log('Make a payment first, then replay it.', 'note'); return; }
+
+  const res = await fetch(`${API}/api/invoices/${id}/payments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ txHash: window.lastTxHash, amountCrypto: 0.001 })
+  });
+
+  const data = await res.json().catch(() => ({}));
+  log(`Replay of ${window.lastTxHash} rejected with ${res.status}: ${data.detail}`, res.status === 409 ? 'ok' : 'err');
+  refresh();
+}
+
+async function cancel(id) {
+  const res = await fetch(`${API}/api/invoices/${id}/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason: 'Cancelled from the demo client' })
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) log(`Invoice cancelled.`, 'ok');
+  else log(`${res.status} ${data.title}: ${data.detail}`, 'err');
+  refresh();
+}
+
+function countdown(seconds) {
+  if (seconds <= 0) return '<span class="note">-</span>';
+  const m = Math.floor(seconds / 60), s = seconds % 60;
+  const cls = seconds < 120 ? 'countdown expiring' : 'countdown';
+  return `<span class="${cls}">${m}:${String(s).padStart(2, '0')}</span>`;
+}
+
+// Signature of what is actually on screen. The polling refresh rebuilds the
+// table only when this changes.
+//
+// Rewriting innerHTML on every poll looks harmless and is not: it destroys and
+// recreates every row, so a button being clicked at that moment vanishes from
+// under the cursor and the click is lost. It also resets the countdown cells
+// that the local ticker is updating, making the timer visibly stutter.
+let lastSignature = '';
+
+async function refresh() {
+  try {
+    const res = await fetch(`${API}/api/invoices?pageSize=15`);
+    const data = await res.json();
+    const rows = document.getElementById('rows');
+
+    if (!data.items.length) {
+      rows.innerHTML = '<tr><td colspan="6" class="note">No invoices yet. Create one.</td></tr>';
+      lastSignature = '';
+      return;
+    }
+
+    const signature = data.items.map(i => `${i.id}:${i.status}:${i.totalReceived}`).join('|');
+    if (signature === lastSignature) return;
+    lastSignature = signature;
+
+    rows.innerHTML = data.items.map(i => {
+      const live = i.status === 'Pending' || i.status === 'Underpaid';
+      const actions = live
+        ? `<button class="ghost" style="margin:0;padding:4px 8px" onclick="pay('${i.id}', ${i.cryptoAmount}, false)">Pay</button>
+           <button class="ghost" style="margin:0;padding:4px 8px" onclick="pay('${i.id}', ${i.cryptoAmount}, true)">Underpay</button>
+           <button class="ghost" style="margin:0;padding:4px 8px" onclick="cancel('${i.id}')">Cancel</button>`
+        : `<button class="ghost" style="margin:0;padding:4px 8px" onclick="replay('${i.id}')">Replay</button>`;
+
+      return `<tr data-expires="${i.secondsRemaining}">
+        <td>${i.reference}</td>
+        <td class="mono">${money(i.amountZar)}</td>
+        <td class="mono">${i.cryptoAmount} ${i.asset}</td>
+        <td><span class="pill ${i.status}">${i.status}</span></td>
+        <td class="remaining">${countdown(i.secondsRemaining)}</td>
+        <td class="row">${actions}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    document.getElementById('rows').innerHTML =
+      `<tr><td colspan="6" class="err">Gateway unreachable: ${e.message}</td></tr>`;
+  }
+}
+
+async function loadRates() {
+  try {
+    const res = await fetch(`${API}/api/rates`);
+    const rates = await res.json();
+
+    document.getElementById('rates').innerHTML = rates.map(r =>
+      `<div class="rate"><div class="p">${r.pair}</div><div class="v">${money(r.rate)}</div></div>`
+    ).join('');
+
+    document.getElementById('ratesAsOf').textContent =
+      'as of ' + new Date(rates[0].asOf).toLocaleTimeString('en-ZA');
+  } catch {
+    document.getElementById('rates').innerHTML = '<span class="err">Rate service unreachable</span>';
+  }
+}
+
+// Tick the countdowns locally between refreshes so the checkout timer moves
+// every second without polling the server every second.
+setInterval(() => {
+  document.querySelectorAll('#rows tr[data-expires]').forEach(tr => {
+    let s = parseInt(tr.dataset.expires, 10);
+    if (isNaN(s) || s <= 0) return;
+    s -= 1;
+    tr.dataset.expires = s;
+    tr.querySelector('.remaining').innerHTML = countdown(s);
+  });
+}, 1000);
+
+setInterval(loadRates, 5000);
+setInterval(refresh, 15000);
+
+loadRates();
+refresh();
+</script>
+
+</body>
+</html>

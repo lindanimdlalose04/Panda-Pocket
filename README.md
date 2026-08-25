@@ -17,12 +17,19 @@ docker compose up -d
 That brings up the three backing stores. Application services are added to the
 compose file as they are built.
 
-| Service  | URL                     | Credentials                       |
-|----------|-------------------------|-----------------------------------|
-| Postgres | `localhost:5432`        | see `infra/postgres/init.sql`     |
-| MongoDB  | `localhost:27018`       | `rate_svc` / `rate_pw_dev`        |
-| Seq      | http://localhost:5341   | none (auth disabled, see compose) |
-| Rate API | http://localhost:5003   | none yet (API keys arrive day 4)  |
+| Service     | URL                     | Notes                              |
+|-------------|-------------------------|------------------------------------|
+| **Client**  | http://localhost:5000   | start here                         |
+| Gateway     | http://localhost:5000   | Ocelot, the only public entry point |
+| Invoice API | http://localhost:5002   | `/swagger` for the API docs        |
+| Rate API    | http://localhost:5003   | `/swagger` for the API docs        |
+| Seq         | http://localhost:5341   | logs, auth disabled, see compose   |
+| Postgres    | `localhost:5432`        | see `infra/postgres/init.sql`      |
+| MongoDB     | `localhost:27018`       | `rate_svc` / `rate_pw_dev`         |
+
+Open **http://localhost:5000** and the client is there: create an invoice, watch
+the countdown, pay it, underpay it, replay a transaction. Every call it makes
+goes through the gateway, never directly to a service.
 
 MongoDB is published on **27018**, not the usual 27017, because a local MongoDB
 service on the development machine already holds that port and a host process
@@ -119,6 +126,29 @@ PandaPocket.sln
 ├─ docs/                      diagrams and report
 └─ docker-compose.yml
 ```
+
+## The payment flow
+
+```bash
+curl -X POST http://localhost:5000/api/invoices   -H "Content-Type: application/json"   -H "X-Correlation-Id: my-trace-001"   -d '{"amountZar":250,"reference":"COFFEE-001","asset":"BTC"}'
+```
+
+The invoice comes back with a rate locked for fifteen minutes. That lock is the
+product: the merchant is quoted R250 and receives R250 whatever the price does,
+because the platform carries the risk rather than the shop.
+
+Then filter Seq by `CorrelationId = 'my-trace-001'` and one request is visible
+crossing Gateway, Invoice and Rate in order, with its SOC events alongside.
+
+`requests/invoice.http` has the full set with commentary, including the status
+codes worth knowing about:
+
+| Code | Meaning |
+|------|---------|
+| 409  | Duplicate transaction hash, or a payment against a terminal invoice |
+| 410  | Payment against an expired invoice: fetch a fresh one, do not retry |
+| 422  | Underpayment: stored, invoice can still be topped up |
+| 503  | Rate unavailable and no cached fallback |
 
 ## The Rate service
 

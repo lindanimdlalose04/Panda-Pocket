@@ -128,6 +128,72 @@ services:
       start_period: 20s
     networks: [pandapocket]
 
+  # ---------------------------------------------------------------------------
+  # Invoice: the payment lifecycle and the state machine.
+  #
+  # Applies its own EF Core migrations at startup, so a clean clone plus
+  # "docker compose up" produces a working schema with no manual step.
+  # ---------------------------------------------------------------------------
+  invoice-service:
+    build:
+      context: .
+      dockerfile: src/Services/Invoice.Api/Dockerfile
+    container_name: pp-invoice
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: 8080
+      ConnectionStrings__InvoiceDb: "Host=postgres;Port=5432;Database=invoice_db;Username=invoice_svc;Password=invoice_pw_dev"
+      # Reached by compose DNS on the service name, never an IP.
+      Invoice__RateServiceBaseUrl: http://rate-service:8080
+      Seq__ServerUrl: http://seq:5341
+    ports:
+      - "5002:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rate-service:
+        condition: service_healthy
+      seq:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [pandapocket]
+
+  # ---------------------------------------------------------------------------
+  # Gateway: the single public entry point.
+  #
+  # Routes by path to the services above, using compose service names that
+  # Docker's embedded DNS resolves. Also serves the browser client, which is why
+  # the client's fetch calls are same-origin and need no CORS.
+  # ---------------------------------------------------------------------------
+  gateway:
+    build:
+      context: .
+      dockerfile: src/Gateway/Dockerfile
+    container_name: pp-gateway
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: 8080
+      Seq__ServerUrl: http://seq:5341
+    ports:
+      - "5000:8080"
+    depends_on:
+      invoice-service:
+        condition: service_healthy
+      rate-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [pandapocket]
+
 volumes:
   pgdata:
   mongodata:

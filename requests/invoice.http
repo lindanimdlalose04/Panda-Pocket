@@ -1,0 +1,195 @@
+### Panda Pocket - Invoice service, through the API gateway
+###
+### Everything here goes through the gateway on 5000 rather than hitting the
+### Invoice service on 5002 directly. That is the point of a gateway: one public
+### entry point, one place for authentication and rate limiting, and services
+### that are not individually exposed.
+###
+### The status codes below are chosen deliberately. 409, 410 and 422 say three
+### genuinely different things to a merchant integration, and a client can act
+### on the difference: 409 means stop, 410 means get a fresh invoice, 422 means
+### the customer still owes money.
+
+@gw = http://localhost:5000
+@invoice = http://localhost:5002
+
+### ---------------------------------------------------------------------------
+### Create an invoice. 201.
+###
+### Invoice calls Rate for a quote, fixes that rate on the invoice, and never
+### recalculates it. That single decision is the product: the merchant is quoted
+### R250 and receives R250 no matter what Bitcoin does over the next fifteen
+### minutes, because the platform carries the price risk, not the shop.
+### ---------------------------------------------------------------------------
+POST {{gw}}/api/invoices
+Content-Type: application/json
+X-Correlation-Id: demo-create-001
+
+{
+  "amountZar": 250.00,
+  "reference": "COFFEE-SHOP-0001",
+  "asset": "BTC"
+}
+
+### Validation failure. 400 with the specific offending fields, which is far
+### more use to an integrator than a bare "bad request".
+POST {{gw}}/api/invoices
+Content-Type: application/json
+
+{
+  "amountZar": -5,
+  "reference": "",
+  "asset": "BTC"
+}
+
+### Same reference twice. 409.
+### The unique index on (merchant_id, reference) is what stops a merchant's own
+### retry logic quietly creating two invoices for one customer order.
+POST {{gw}}/api/invoices
+Content-Type: application/json
+
+{
+  "amountZar": 250.00,
+  "reference": "COFFEE-SHOP-0001",
+  "asset": "BTC"
+}
+
+### ---------------------------------------------------------------------------
+### Read and list
+### ---------------------------------------------------------------------------
+
+### Replace the id with one returned above.
+GET {{gw}}/api/invoices/00000000-0000-0000-0000-000000000000
+
+### List. Paging parameters are optional and default to page 1, size 20.
+GET {{gw}}/api/invoices
+
+###
+GET {{gw}}/api/invoices?status=Pending&pageSize=10
+
+### An unrecognised status returns 400 listing the valid values, rather than
+### silently returning an empty list and letting the caller think there is no data.
+GET {{gw}}/api/invoices?status=Bogus
+
+### ---------------------------------------------------------------------------
+### Payments
+###
+### POST .../payments stands in for a blockchain confirmation. In a real gateway
+### this is called by a chain watcher, not by the customer.
+### ---------------------------------------------------------------------------
+
+### Underpayment. 422.
+### The payment is real and is stored, so the invoice moves to Underpaid and can
+### still be topped up. 422 rather than 400 because the request was perfectly
+### well formed; it just does not satisfy the invoice.
+POST {{gw}}/api/invoices/00000000-0000-0000-0000-000000000000/payments
+Content-Type: application/json
+X-Correlation-Id: demo-create-001
+
+{
+  "txHash": "tx-demo-underpay-01",
+  "amountCrypto": 0.00001
+}
+
+### Replay the same txHash. 409.
+### Rejected by the unique constraint on payments.tx_hash, in the database
+### rather than in application code. That matters: an application-level check
+### can race with itself under concurrent requests, a unique index cannot. The
+### same one line of DDL is both the idempotency guard, so a duplicated
+### confirmation cannot credit a merchant twice, and the replay detector.
+POST {{gw}}/api/invoices/00000000-0000-0000-0000-000000000000/payments
+Content-Type: application/json
+
+{
+  "txHash": "tx-demo-underpay-01",
+  "amountCrypto": 0.00001
+}
+
+### Top up to the full amount. 200, and the invoice becomes Paid.
+POST {{gw}}/api/invoices/00000000-0000-0000-0000-000000000000/payments
+Content-Type: application/json
+
+{
+  "txHash": "tx-demo-topup-01",
+  "amountCrypto": 0.00014
+}
+
+### Payment against an expired invoice. 410 Gone.
+### Not 404, because the invoice exists, and not 400, because the request is
+### valid. What changed is that the window closed and the locked rate is no
+### longer one the platform will honour. Gone tells the integration to request a
+### fresh invoice rather than retry this one.
+###
+### To see it: create an invoice, wait for the expiry window, then pay it. Drop
+### Invoice__ExpiryMinutes to 1 in docker-compose.yml to avoid waiting fifteen.
+POST {{gw}}/api/invoices/00000000-0000-0000-0000-000000000000/payments
+Content-Type: application/json
+
+{
+  "txHash": "tx-demo-late-01",
+  "amountCrypto": 0.00014
+}
+
+### ---------------------------------------------------------------------------
+### Cancel
+###
+### An action endpoint, not a PATCH on the status field. A state transition is
+### not a field edit: exposing status as writable would let any client set any
+### value it liked, including Settled, which would mean claiming money had been
+### paid out. Stripe uses the same shape with POST /v1/invoices/{id}/void.
+### ---------------------------------------------------------------------------
+POST {{gw}}/api/invoices/00000000-0000-0000-0000-000000000000/cancel
+Content-Type: application/json
+
+{
+  "reason": "Customer changed their mind"
+}
+
+### Cancelling something already terminal returns 409. Every transition is
+### checked against the shared state machine in Shared/Contracts, so the rule is
+### stated once and cannot drift between services.
+POST {{gw}}/api/invoices/00000000-0000-0000-0000-000000000000/cancel
+Content-Type: application/json
+
+{}
+
+### ---------------------------------------------------------------------------
+### Audit trail
+###
+### One row per transition, written in the same SaveChanges as the transition
+### itself, so the history cannot drift from the invoice it describes.
+###
+### This table is three things at once: the audit trail, the SOC event source,
+### and the edge source for the Neo4j knowledge graph in the next phase, where
+### each row becomes a timestamped edge carrying the correlation id that links
+### it to everything else in the same request.
+###
+### Note that sweeper-driven expiries have a null correlation id. That is
+### deliberate and honest: no caller's request caused them, time did.
+### ---------------------------------------------------------------------------
+GET {{gw}}/api/invoices/00000000-0000-0000-0000-000000000000/history
+
+### ---------------------------------------------------------------------------
+### Tracing
+###
+### Supply a correlation id and the gateway forwards it to every service. Filter
+### Seq at http://localhost:5341 by
+###
+###   CorrelationId = 'demo-create-001'
+###
+### and one payment is visible crossing Gateway, Invoice and Rate in order, with
+### the SOC events alongside. Omit the header and the gateway mints one, echoed
+### back on the response so it can be quoted.
+### ---------------------------------------------------------------------------
+
+### Health. The gateway reports only its own liveness on purpose: a gateway that
+### called itself unhealthy because one service was down would be pulled out of
+### rotation exactly when it could still route to the others.
+GET {{gw}}/health
+
+### Invoice's own health probes Postgres rather than just confirming the process
+### is running.
+GET {{invoice}}/health
+
+### OpenAPI. Swagger UI is at {{invoice}}/swagger.
+GET {{invoice}}/swagger/v1/swagger.json

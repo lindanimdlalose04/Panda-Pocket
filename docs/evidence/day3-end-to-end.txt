@@ -1,0 +1,52 @@
+Panda Pocket - end-to-end verification through the API gateway (day 3)
+Captured: 2026-08-25 18:57 UTC
+
+=== containers ===
+NAME          STATE     STATUS                    PORTS
+pp-gateway    running   Up 7 minutes (healthy)    0.0.0.0:5000->8080/tcp, [::]:5000->8080/tcp
+pp-invoice    running   Up 25 minutes (healthy)   0.0.0.0:5002->8080/tcp, [::]:5002->8080/tcp
+pp-mongo      running   Up 5 hours (healthy)      0.0.0.0:27018->27017/tcp, [::]:27018->27017/tcp
+pp-postgres   running   Up 5 hours (healthy)      0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp
+pp-rate       running   Up 5 hours (healthy)      0.0.0.0:5003->8080/tcp, [::]:5003->8080/tcp
+pp-seq        running   Up 5 hours                0.0.0.0:5341->80/tcp, [::]:5341->80/tcp
+
+=== service discovery: gateway resolves service names via Docker DNS ===
+172.18.0.6      invoice-service
+172.18.0.3      rate-service
+
+=== create through gateway ===
+{
+    "id": "2096f83f-2a1b-43b4-a153-5ded55611b05",
+    "merchantId": "11111111-1111-1111-1111-111111111111",
+    "reference": "EVIDENCE-1787684276",
+    "amountZar": 250,
+    "asset": "BTC",
+    "lockedRate": 1752230.3,
+    "cryptoAmount": 0.00014268,
+    "payToAddress": "bc1q100da3770bc1a14b93465f6f64991dfb",
+    "status": "Pending",
+    "expiresAt": "2026-08-25T19:13:03.8056636Z",
+    "createdAt": "2026-08-25T18:58:03.8056636Z",
+    "settledAt": null,
+    "totalReceived": 0,
+    "secondsRemaining": 897
+}
+
+=== status code matrix (all through the gateway) ===
+  underpay          -> HTTP 422 (expect 422)
+  replay same hash  -> HTTP 409 (expect 409)
+  top up to full    -> HTTP 200 (expect 200)
+  pay a paid invoice-> HTTP 409 (expect 409)
+  unknown status    -> HTTP 400 (expect 400)
+  missing invoice   -> HTTP 404 (expect 404)
+
+=== audit trail ===
+  (new)     -> Pending   | Invoice created
+  Pending   -> Underpaid | Underpaid: received 0.00001 of 0.00014268 BTC
+  Underpaid -> Paid      | Payment received: 0.00015268 BTC
+
+=== correlation id evidence-1787684275 across services in Seq ===
+  total events: 23
+   Gateway   12 event(s)
+   Invoice   10 event(s)
+   Rate      1 event(s)

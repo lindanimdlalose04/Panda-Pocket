@@ -273,3 +273,152 @@ pp-mongo      running (healthy)   27018->27017  MongoDB 7
 pp-seq        running             5341->80      Seq 2026.1.17114
 pp-rate       running (healthy)   5003->8080    Rate service
 ```
+
+---
+
+## Day 3, Monday 24 August 2026 - Invoice service and gateway
+
+### Built
+
+- Invoice service: EF Core over Postgres with `invoices`, `payments` and
+  `invoice_status_history`, the state machine enforced on every transition, an
+  expiry sweeper, six endpoints, Swagger, Serilog to Seq and a health check that
+  probes Postgres.
+- Ocelot API gateway routing to Invoice and Rate by compose service name, minting
+  correlation ids and serving the browser client.
+- `src/Gateway/wwwroot/index.html`: plain HTML and fetch, no framework, no build
+  step. Create form, live rates, invoice table with countdown, and buttons for
+  pay, underpay, cancel and replay.
+- Both containerised and added to compose. Six containers now come up from one
+  command.
+- `requests/invoice.http`.
+- `HealthResponseWriter` moved from Rate into `Shared/Contracts` now that a
+  second service needs it.
+
+### The first end-to-end moment
+
+The HTML page creates an invoice through the gateway, in Docker: browser to
+Gateway to Invoice to Rate to Postgres, every hop resolved by Docker DNS. This
+was the day's stated goal and the point at which the system stopped being parts.
+
+### Decisions
+
+**The locked rate is written once and never recalculated.** One assignment in
+`InvoiceService.CreateAsync` is the entire product. The merchant is quoted R250
+and receives R250 regardless of what the price does inside the window, because
+the platform holds the risk for those fifteen minutes rather than the shop.
+
+**Crypto amounts round up, not to nearest.** Rounding down would ask the customer
+for fractionally less than the invoice is worth, and across many invoices that is
+a systematic loss to the platform rather than a rounding artefact.
+
+**Money is `numeric`, never `double`.** Binary floating point cannot represent
+0.1 exactly. Eight decimal places on crypto columns because that is one satoshi.
+
+**Status is stored as text, not an integer enum.** An integer is more compact and
+makes the table unreadable during a demo, and worse, any future reordering of the
+enum silently corrupts existing rows.
+
+**`/cancel` is an action endpoint, not a `PATCH` on status.** A state transition
+is not a field edit. Exposing status as writable would let a client set any value
+it liked, including `Settled`, which is a client asserting it has been paid out.
+
+**Differentiated status codes, and the difference is actionable.** 409 for a
+duplicate transaction hash, 410 for a payment against an expired invoice, 422 for
+an underpayment. A merchant integration can act on each differently: stop, fetch
+a fresh invoice, or wait for the rest of the money. All verified.
+
+**Migrations run at startup.** For a coursework artefact that must come up from a
+clean clone with one command, an automatic migration is the difference between
+`docker compose up` working and a marker running EF tooling by hand. A production
+system would make this a deliberate deployment step, because automatic migration
+under multiple replicas is a race. The retry loop exists because a container
+reported healthy is not always immediately accepting connections.
+
+**An expiry sweeper as well as a lazy check.** The payment path checks expiry
+directly as a safety net, but lazy evaluation alone would leave an invoice nobody
+looks at sitting in `Pending` for ever, so status filters would report stale
+figures and the audit trail would have no record of the moment the window closed.
+Sweeper-driven expiries carry a **null correlation id**, which is honest: no
+caller's request caused them, time did.
+
+### The bug that mattered most
+
+**EF Core relationship fixup silently marked underpaid invoices as fully paid.**
+
+The first version added the payment to both `db.Payments` and
+`invoice.Payments`, then summed the navigation collection. That looks correct and
+is not. EF performs relationship fixup: `db.Payments.Add` sees a tracked parent
+and appends the payment to `invoice.Payments` itself, so adding it manually put
+it in the collection twice and the total doubled. A payment of 0.0001 against a
+required 0.00014109 was accepted as **Paid**.
+
+That failure is silent, produces a valid-looking invoice, and in a real system
+would credit a merchant for money never received. The running total is now
+computed from the existing payments plus this one, before anything is attached,
+which is deterministic regardless of fixup.
+
+Caught only because the status codes were tested one by one rather than assumed.
+
+### Two smaller ones
+
+**Non-nullable `int` query parameters are required in minimal APIs.** `int page`
+meant `GET /api/invoices` with no query string returned 400 complaining that
+"page" was not provided. Paging must be `int?` with defaults applied inside.
+
+**Ocelot is terminal middleware, so `app.MapGet("/health")` was unreachable.**
+When no route matches, Ocelot returns 404 itself rather than calling the next
+middleware, so endpoint routing never runs. The gateway health check had to
+become a `Map` branch registered before Ocelot. Anything the gateway serves
+itself, including static files, has to sit above it.
+
+### The client re-render flaw
+
+The invoice table rebuilt its entire `innerHTML` on every fifteen-second poll.
+That destroys and recreates every row, so a button being clicked at that instant
+vanishes from under the cursor and the click is lost, and the countdown cells the
+local ticker is updating visibly stutter. It now compares a signature of id,
+status and received amount, and only re-renders when something actually changed.
+
+Found while driving the page with a browser tool, which kept losing element
+references. Worth having fixed: the same thing would have happened live.
+
+### On service discovery
+
+Ocelot routes to `invoice-service` and `rate-service`, never to an IP or to
+localhost. Docker's embedded DNS resolves those names to whichever container
+currently holds them, verified in the evidence file:
+
+```
+172.18.0.6      invoice-service
+172.18.0.3      rate-service
+```
+
+Containers can be stopped, rebuilt and given a different IP with no gateway
+reconfiguration. `ocelot.json` holds the deployed routing and
+`ocelot.Development.json` repoints the same routes at localhost for running the
+gateway outside Docker. The routes are repeated in full rather than patched,
+because .NET configuration merges JSON arrays by index and a partial override
+would silently depend on both files keeping their routes in the same order.
+
+### Done when
+
+- [x] The HTML page creates an invoice through the gateway
+- [x] Gateway routes to Invoice and Rate by compose service name
+- [x] Invoice calls Rate and locks the returned rate on the invoice
+- [x] All three tables created by migration, owned by `invoice_svc`
+- [x] Status codes verified: 201, 400, 404, 409, 410, 422, 503
+- [x] Audit trail records every transition with its correlation id
+- [x] One correlation id visible across Gateway, Invoice and Rate in Seq
+- [x] Six containers healthy from a single `docker compose up`
+
+### Verified state at end of day 3
+
+```
+pp-postgres   running (healthy)   5432->5432    PostgreSQL 16.15
+pp-mongo      running (healthy)   27018->27017  MongoDB 7
+pp-seq        running             5341->80      Seq 2026.1.17114
+pp-rate       running (healthy)   5003->8080    Rate service
+pp-invoice    running (healthy)   5002->8080    Invoice service
+pp-gateway    running (healthy)   5000->8080    Ocelot gateway + client
+```

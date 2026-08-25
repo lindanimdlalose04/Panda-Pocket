@@ -1,7 +1,8 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
-namespace PandaPocket.Services.Rate.Endpoints;
+namespace PandaPocket.Shared.Contracts.Observability;
 
 /// <summary>
 /// The default health response is the single word "Healthy", which is useless
