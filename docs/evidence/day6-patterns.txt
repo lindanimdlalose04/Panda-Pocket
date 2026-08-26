@@ -1,0 +1,55 @@
+Panda Pocket - patterns and observability verification (day 6)
+Captured: 2026-08-26 19:14 UTC
+
+=== containers ===
+NAME            STATE     STATUS
+pp-gateway      running   Up 11 minutes (healthy)
+pp-invoice      running   Up 59 seconds (healthy)
+pp-merchant     running   Up 11 minutes (healthy)
+pp-mongo        running   Up 11 minutes (healthy)
+pp-postgres     running   Up 11 minutes (healthy)
+pp-rate         running   Up 5 minutes (healthy)
+pp-seq          running   Up 11 minutes
+pp-settlement   running   Up 11 minutes (healthy)
+
+=== CIRCUIT BREAKER: invoice creation survives a Rate outage ===
+  Cold start, Rate down, no cached rate     -> HTTP 503 (refuses to invent a price)
+  Warm cache, Rate stopped, 6 attempts      -> HTTP 201 x6, all on the cached rate
+  Locked rate matched the cached value exactly (R1743665.50)
+
+  Audit trail on a fallback invoice:
+    (new) -> Pending | Invoice created on a cached rate, 53s old (rate-service unavailable)
+
+  Breaker state machine, from the Invoice log:
+    [19:15:25 WRN] Circuit to rate-service OPENED for 15s after 50 % failures
+    [19:15:43 INF] Circuit to rate-service HALF-OPEN; probing with a single request
+    [19:15:43 INF] Circuit to rate-service CLOSED; the dependency is answering again
+
+=== SOC catalogue: all 11 event types verified present in Seq ===
+  AUTH_FAILED                    present
+  API_KEY_INVALID                present
+  RATE_LIMIT_EXCEEDED            present
+  INVOICE_CREATED                present
+  PAYMENT_CONFIRMED              present
+  PAYMENT_UNDERPAID              present
+  PAYMENT_ON_EXPIRED_INVOICE     present
+  PAYMENT_REPLAY_ATTEMPT         present
+  WEBHOOK_DELIVERY_FAILED        present
+  CIRCUIT_OPENED                 present
+  MERCHANT_WEBHOOK_URL_CHANGED   present
+
+=== CIRCUIT_OPENED detail, both rejection paths ===
+  reason=HttpRequestException     pair=BTCZAR fallbackRate=1743665.5 staleness=53.4s
+  reason=BrokenCircuitException   pair=BTCZAR fallbackRate=1743665.5 staleness=29.3s
+
+  HttpRequestException  = breaker CLOSED, the call was attempted and failed
+  BrokenCircuitException = breaker OPEN, the call was rejected without trying
+
+=== RATE LIMITING: 40 requests against a 30/min limit ===
+  allowed 27, throttled 13, first 429 at request #28
+  Retry-After header returned, custom quota message in the body
+  Client identity is X-Merchant-Id, set by the gateway, so the quota is
+  per merchant rather than per key or per IP.
+
+=== STATUS CODES corrected this day ===
+  Payment against an already-expired invoice -> HTTP 410 Gone (was 409)

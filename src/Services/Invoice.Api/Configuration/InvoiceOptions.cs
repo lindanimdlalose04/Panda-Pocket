@@ -28,6 +28,24 @@ public sealed class InvoiceOptions
     /// <summary>Seconds before a Rate call is abandoned.</summary>
     public int RateTimeoutSeconds { get; init; } = 5;
 
+    /// <summary>
+    /// How old a cached rate may be before the fallback refuses to use it.
+    ///
+    /// Past this point a stale rate stops being a degradation and becomes a
+    /// liability: the platform would be locking a merchant to a price that no
+    /// longer reflects the market, and absorbing the difference at settlement.
+    /// </summary>
+    public int MaxFallbackRateAgeMinutes { get; init; } = 30;
+
+    /// <summary>Consecutive-failure ratio that opens the breaker.</summary>
+    public double CircuitFailureRatio { get; init; } = 0.5;
+
+    /// <summary>How long the breaker stays open before probing again.</summary>
+    public int CircuitBreakSeconds { get; init; } = 15;
+
+    /// <summary>Minimum calls in the sampling window before the ratio is judged.</summary>
+    public int CircuitMinimumThroughput { get; init; } = 3;
+
     public string SettlementServiceBaseUrl { get; init; } = "http://localhost:5004";
     public int SettlementTimeoutSeconds { get; init; } = 10;
 

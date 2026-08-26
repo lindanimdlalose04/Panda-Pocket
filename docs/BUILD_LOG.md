@@ -752,3 +752,191 @@ pp-gateway      running (healthy)   5000->8080    Ocelot gateway + client
 All four services and the gateway are now built, containerised and healthy from
 a single `docker compose up`. Day 6 adds no new services, only the circuit
 breaker, rate limiting and the remaining observability work.
+
+---
+
+## Day 6, Thursday 27 August 2026 - patterns and observability
+
+No new features, as planned. Three of the day's five items were already done,
+because health checks and correlation middleware were pulled forward to day 2
+and SOC emission grew through days 3 to 5. That left the circuit breaker and
+rate limiting.
+
+### Built
+
+- Circuit breaker on Invoice to Rate, using
+  `Microsoft.Extensions.Http.Resilience`, with a cached last-known-good rate as
+  the fallback and a staleness ceiling.
+- Ocelot rate limiting on the invoice write path, returning 429.
+- The final two SOC events, `CIRCUIT_OPENED` and `RATE_LIMIT_EXCEEDED`. All
+  eleven catalogue entries are now verified present in Seq.
+
+### Decisions
+
+**A breaker without a fallback would be pointless here.** On its own a circuit
+breaker converts a slow failure into a fast one, which helps the system and does
+nothing for the merchant: their checkout still fails, just sooner. The cached
+rate is what turns it into a genuine degradation. While Rate is down, invoices
+are still created, priced from the last rate we saw.
+
+**The cache lives in memory, not in the database.** It is a cache of something
+another service owns and is rebuilt within seconds of the first successful
+quote. Persisting it would mean a container could start up and confidently serve
+a rate from last week.
+
+**There is a staleness ceiling, currently thirty minutes.** Past that a stale
+rate stops being a degradation and becomes a liability: the platform would be
+locking a merchant to a price that no longer reflects the market and absorbing
+the difference at settlement. Beyond the ceiling, declining is the cheaper
+mistake.
+
+**A cold start with Rate already down returns 503, and should.** There is no
+honest number to fall back on, so the service refuses rather than inventing one.
+Verified.
+
+**Fallback use is written into the invoice audit trail**, with the staleness:
+
+```
+(new) -> Pending | Invoice created on a cached rate, 53s old (rate-service unavailable)
+```
+
+Months later it is still possible to answer "why was this invoice priced at
+that", and a degraded invoice stays distinguishable from a healthy one.
+
+**A 404 from Rate is not a fallback case.** That is Rate working correctly and
+saying the pair does not exist. Serving a cached rate for a pair Rate has
+stopped publishing would be worse than refusing, so the cache is deliberately
+not consulted on 404.
+
+**Rate limiting is keyed on `X-Merchant-Id`, not the API key or the IP.** The
+gateway sets that header itself after validating the key, so the quota is per
+merchant: three keys share one quota, which is the honest unit, because the
+limit protects the platform from one customer rather than from one credential.
+Per-IP would lump every merchant behind a corporate NAT into a single bucket.
+
+**Limits apply to the invoice write path only.** Rates are public market data
+that a checkout page polls legitimately every few seconds.
+
+### The bug that mattered: the breaker defeated its own fallback
+
+The first version caught `HttpRequestException`, `TaskCanceledException` and
+`InvalidOperationException` around the Rate call. Testing with Rate stopped gave:
+
+```
+attempt 1 -> HTTP 201     fallback worked
+attempt 2 -> HTTP 201     fallback worked
+attempt 3 -> HTTP 500
+attempt 4 -> HTTP 500
+```
+
+While the breaker is CLOSED, a failing call surfaces as `HttpRequestException`
+and the fallback runs. Once the breaker OPENS it stops calling Rate at all and
+throws `BrokenCircuitException`, which derives from `ExecutionRejectedException`
+and not from `HttpRequestException`. So the catch worked right up until the
+breaker tripped, and then stopped working at exactly the moment the breaker
+started doing its job.
+
+This is worth stating plainly because it is the classic circuit breaker mistake:
+the breaker opening throws a *different* exception type from the failure it was
+created to handle, so a catch written for the underlying failure misses
+precisely the case the breaker exists to produce. Two requests degrade
+gracefully and every one after that returns 500.
+
+Fixed by catching `ExecutionRejectedException`, the base type, which also covers
+timeout and rate-limiter strategies if they are added to this pipeline later.
+
+Both paths are now visible in Seq, and the difference between them is the state
+of the breaker:
+
+```
+reason=HttpRequestException    breaker CLOSED, the call was attempted and failed
+reason=BrokenCircuitException  breaker OPEN, the call was rejected without trying
+```
+
+### The spec bug the SOC audit found
+
+Checking that all eleven event types actually appear in Seq turned up
+`PAYMENT_ON_EXPIRED_INVOICE` missing. Chasing why exposed a real
+spec-compliance bug rather than a logging gap.
+
+The specification says a payment against an expired invoice returns **410 Gone**.
+It was returning 409. The 410 branch only fired while an invoice was still
+`Pending` or `Underpaid` and had just passed its deadline, which is a window of
+at most one sweep interval. Once the ExpirySweeper moved it to `Expired`, the
+payment fell into the generic terminal-state branch and got 409 instead. Since
+the sweeper runs every thirty seconds, the specified 410 was effectively
+unreachable and the event never fired.
+
+The distinction matters to an integrator: 409 says stop, 410 says this one is
+gone, request a fresh invoice. Fixed with an explicit `Expired` branch that
+returns 410 and emits the event. Verified.
+
+Worth noting how this was found. The bug was invisible from the endpoint tests,
+which all passed, and only surfaced from asking "is every event in the catalogue
+actually being emitted". Auditing observability found a correctness bug.
+
+### Verification
+
+Circuit breaker:
+
+```
+Cold start, Rate down, no cached rate  -> HTTP 503, refuses to invent a price
+Warm cache, Rate stopped, 6 attempts   -> HTTP 201 x6, all on the cached rate
+Locked rate matched the cached value exactly (R1743665.50)
+
+Circuit to rate-service OPENED for 15s after 50 % failures
+Circuit to rate-service HALF-OPEN; probing with a single request
+Circuit to rate-service CLOSED; the dependency is answering again
+```
+
+Rate limiting: 40 requests against a 30 per minute limit gave 27 allowed and 13
+throttled, first 429 at request 28, with a `Retry-After` header and the
+configured quota message.
+
+### An honest gap
+
+Unauthenticated requests are rejected by the API key middleware before Ocelot
+ever sees them, so they carry no `X-Merchant-Id` and are never rate limited.
+Someone brute forcing API keys is throttled by nothing at this layer. Every
+rejection is logged as `API_KEY_INVALID` with its source address, so the SOC
+layer can see it, but detection is not prevention. Recorded in `ocelot.json` and
+stated here rather than glossed over.
+
+### Done when
+
+- [x] Stopping the Rate container still allows invoice creation on a fallback rate
+- [x] `CIRCUIT_OPENED` appears in Seq, with both rejection paths distinguishable
+- [x] The breaker opens, half-opens and closes, all observable
+- [x] Ocelot rate limiting returns 429 with `Retry-After`
+- [x] `RATE_LIMIT_EXCEEDED` appears in Seq with merchant, path and source address
+- [x] All eleven SOC catalogue events verified present in Seq
+- [x] Health checks probe their database (done day 2)
+- [x] Correlation ids propagate across services (done day 2)
+
+### Patterns implemented, final count
+
+1. Database per service, with polyglot persistence
+2. Circuit breaker with a cached fallback (Invoice to Rate)
+3. Retry with exponential backoff and dead-lettering (webhook delivery)
+4. Retry against an idempotent endpoint, plus a sweeper (Invoice to Settlement)
+5. Centralised logging with correlation ids
+6. Health checks that probe their dependency
+7. API key and JWT authentication, validated at the gateway
+8. Rate limiting at the gateway
+
+Two were required.
+
+### Verified state at end of day 6
+
+```
+pp-postgres     running (healthy)   5432->5432    PostgreSQL 16.15
+pp-mongo        running (healthy)   27018->27017  MongoDB 7
+pp-seq          running             5341->80      Seq
+pp-rate         running (healthy)   5003->8080    Rate service
+pp-merchant     running (healthy)   5001->8080    Merchant service
+pp-invoice      running (healthy)   5002->8080    Invoice service
+pp-settlement   running (healthy)   5004->8080    Settlement service
+pp-gateway      running (healthy)   5000->8080    Ocelot gateway + client
+```
+
+Code freezes tomorrow night. Day 7 is client polish, seed data and nothing else.

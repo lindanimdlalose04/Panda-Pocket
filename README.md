@@ -207,6 +207,54 @@ codes worth knowing about:
 | 422  | Underpayment: stored, invoice can still be topped up |
 | 503  | Rate unavailable and no cached fallback |
 
+## Resilience: what happens when things break
+
+Three service-to-service calls, three different strategies, each chosen from what
+failure costs:
+
+| Call | Strategy | Why |
+|---|---|---|
+| Invoice to Rate | Circuit breaker with a cached fallback | Critical path. A slightly stale rate beats a checkout that hangs. |
+| Invoice to Settlement | Retry against an idempotent endpoint, plus a sweeper | It is money. Losing it means a merchant was paid and never credited. |
+| Settlement to merchant | Durable queue, backoff with jitter, dead letter | External and untrusted. Cannot be fixed by us, must not be hammered. |
+
+### Watching the circuit breaker
+
+```bash
+curl -X POST http://localhost:5000/api/invoices   -H "Content-Type: application/json"   -H "X-API-Key: pk_live_demo0000000000000000000000000000000000"   -d '{"amountZar":250,"reference":"WARM-1","asset":"BTC"}'
+
+docker compose stop rate-service
+```
+
+Now create another invoice. It still returns **201**, priced from the last rate
+seen, and the audit trail records that:
+
+```bash
+curl http://localhost:5000/api/invoices/{id}/history   -H "X-API-Key: pk_live_demo0000000000000000000000000000000000"
+
+# (new) -> Pending | Invoice created on a cached rate, 53s old (rate-service unavailable)
+```
+
+Filter Seq by `EventType = 'CIRCUIT_OPENED'` and the breaker's state is visible in
+the `reason` field: `HttpRequestException` means the breaker was closed and the
+call failed, `BrokenCircuitException` means it was open and the call was rejected
+without being attempted.
+
+`docker compose start rate-service` and the breaker half-opens, probes, and
+closes on its own.
+
+A cold start with Rate already down returns **503**, on purpose: there is no
+cached rate to fall back on, and inventing a price would be worse than refusing.
+
+### Rate limiting
+
+Thirty invoice requests per minute per merchant. The 31st gets **429** with a
+`Retry-After` header, and raises `RATE_LIMIT_EXCEEDED` in Seq.
+
+The quota is keyed on the merchant, not the API key or the IP, so a merchant with
+three keys shares one quota. Rates are exempt: a checkout page polls them
+legitimately.
+
 ## Settlement, the ledger and webhooks
 
 Paying an invoice credits the merchant and queues a signed notification.

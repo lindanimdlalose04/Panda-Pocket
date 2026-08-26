@@ -1,5 +1,6 @@
 using PandaPocket.Gateway.Authentication;
 using PandaPocket.Gateway.Demo;
+using PandaPocket.Gateway.Observability;
 using Ocelot.DependencyInjection;
 using Ocelot.Middleware;
 using PandaPocket.Shared.Contracts.Observability;
@@ -68,6 +69,9 @@ app.UseCors();
 // ocelot.json names the same header.
 app.UseCorrelationId();
 app.UseSerilogRequestLogging();
+
+// Above Ocelot, so it can observe the 429 Ocelot writes on the way back out.
+app.UseRateLimitEvents();
 
 // Serve the client from wwwroot. Visiting the gateway root gives a working
 // checkout rather than a 404.

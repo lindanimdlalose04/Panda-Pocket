@@ -24,13 +24,16 @@ public sealed class InvoiceService(
     {
         var pair = $"{asset.ToUpperInvariant()}ZAR";
 
-        var quote = await rateClient.GetQuoteAsync(pair, correlationId, ct);
-        if (quote is null)
+        // Behind a circuit breaker. A null here means Rate is unreachable AND
+        // there is no usable cached rate, which is the only case left where an
+        // invoice genuinely cannot be priced.
+        var rate = await rateClient.GetQuoteAsync(pair, correlationId, ct);
+        if (rate is null)
         {
-            // Day 6 puts a circuit breaker with a cached rate here, at which
-            // point this becomes the fallback path rather than a hard failure.
             return InvoiceResult.Fail(InvoiceOutcome.RateUnavailable, $"No rate available for {pair}.");
         }
+
+        var quote = rate.Quote;
 
         if (quote.Rate <= 0)
         {
@@ -68,7 +71,16 @@ public sealed class InvoiceService(
 
         // The initial transition has no "from", because the invoice did not
         // exist before this moment.
-        AddHistory(invoice, null, InvoiceStatus.Pending, "Invoice created", correlationId, now);
+        //
+        // When the rate came from the cache rather than from Rate, that fact is
+        // written into the audit trail along with how stale it was. Months later
+        // it is still possible to answer "why was this invoice priced at that",
+        // and a degraded invoice stays distinguishable from a healthy one.
+        var reason = rate.IsFallback
+            ? $"Invoice created on a cached rate, {rate.Staleness.TotalSeconds:F0}s old (rate-service unavailable)"
+            : "Invoice created";
+
+        AddHistory(invoice, null, InvoiceStatus.Pending, reason, correlationId, now);
 
         try
         {
@@ -87,7 +99,9 @@ public sealed class InvoiceService(
             ["amountZar"] = amountZar,
             ["asset"] = invoice.Asset,
             ["lockedRate"] = invoice.LockedRate,
-            ["cryptoAmount"] = invoice.CryptoAmount
+            ["cryptoAmount"] = invoice.CryptoAmount,
+            ["rateWasFallback"] = rate.IsFallback,
+            ["rateStalenessSeconds"] = Math.Round(rate.Staleness.TotalSeconds, 1)
         });
 
         return InvoiceResult.Ok(invoice);
@@ -123,7 +137,33 @@ public sealed class InvoiceService(
             return InvoiceResult.Fail(InvoiceOutcome.Expired, "This invoice expired before the payment arrived.", invoice);
         }
 
-        if (invoice.Status is InvoiceStatus.Paid or InvoiceStatus.Settled or InvoiceStatus.Cancelled or InvoiceStatus.Expired)
+        // An invoice the sweeper has already moved to Expired.
+        //
+        // This branch has to exist separately from the one above, and the reason
+        // is easy to miss. The check above only fires while the invoice is still
+        // Pending or Underpaid and has just passed its deadline, which is a
+        // window of at most one sweep interval. Once the ExpirySweeper has run,
+        // the invoice is Expired and would otherwise fall into the generic
+        // terminal-state branch below and return 409.
+        //
+        // That made the specified 410 effectively unreachable, and
+        // PAYMENT_ON_EXPIRED_INVOICE was never emitted in practice. The
+        // distinction matters to an integrator: 409 says stop, 410 says this
+        // one is gone, request a fresh invoice.
+        if (invoice.Status == InvoiceStatus.Expired)
+        {
+            LogSoc(SocEventType.PaymentOnExpired, SocSeverity.Warning, correlationId, invoice.MerchantId, invoice.Id, new()
+            {
+                ["txHash"] = txHash,
+                ["expiredAt"] = invoice.ExpiresAt,
+                ["sweptBeforePayment"] = true
+            });
+
+            return InvoiceResult.Fail(InvoiceOutcome.Expired,
+                "This invoice expired before the payment arrived.", invoice);
+        }
+
+        if (invoice.Status is InvoiceStatus.Paid or InvoiceStatus.Settled or InvoiceStatus.Cancelled)
         {
             return InvoiceResult.Fail(InvoiceOutcome.InvalidTransition,
                 $"Cannot accept a payment against an invoice in state '{invoice.Status}'.", invoice);

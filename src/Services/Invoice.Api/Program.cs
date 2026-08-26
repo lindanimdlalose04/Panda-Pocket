@@ -7,6 +7,7 @@ using PandaPocket.Services.Invoice.Domain;
 using PandaPocket.Services.Invoice.Endpoints;
 using PandaPocket.Services.Invoice.Persistence;
 using PandaPocket.Shared.Contracts.Observability;
+using Polly;
 using Serilog;
 
 // ---------------------------------------------------------------------------
@@ -32,16 +33,62 @@ builder.Services.Configure<InvoiceOptions>(builder.Configuration.GetSection(Invo
 builder.Services.AddDbContext<InvoiceDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("InvoiceDb")));
 
-// The Rate call is on the critical path of creating an invoice, so it gets a
-// short timeout. A merchant checkout must not hang because a rate lookup is
-// slow: failing in five seconds and saying so is better than holding the
-// request open. Day 6 wraps this handler in a circuit breaker with a cached
-// fallback, at which point a Rate outage degrades rather than blocks.
+// Last known good rate per pair, read when the breaker is open.
+builder.Services.AddSingleton<RateCache>();
+
+var invoiceOptions = builder.Configuration.GetSection(InvoiceOptions.SectionName).Get<InvoiceOptions>() ?? new InvoiceOptions();
+
+// The Rate call is on the critical path of creating an invoice, so it fails
+// fast and degrades rather than blocking. A merchant checkout must not hang
+// because a rate lookup is slow.
 builder.Services.AddHttpClient<IRateClient, RateClient>((sp, client) =>
 {
     var options = sp.GetRequiredService<IOptions<InvoiceOptions>>().Value;
     client.BaseAddress = new Uri(options.RateServiceBaseUrl);
     client.Timeout = TimeSpan.FromSeconds(options.RateTimeoutSeconds);
+})
+.AddResilienceHandler("rate-circuit-breaker", (pipeline, context) =>
+{
+    // The breaker exists to stop Invoice queuing requests against a dependency
+    // that is already failing. Without it, every invoice creation would wait out
+    // the full timeout, threads would pile up behind a service that cannot
+    // answer, and a Rate outage would degrade Invoice as well. Once open, calls
+    // are rejected immediately and the cached rate is used instead, so the
+    // failure is contained to one service rather than spreading.
+    pipeline.AddCircuitBreaker(new Polly.CircuitBreaker.CircuitBreakerStrategyOptions<HttpResponseMessage>
+    {
+        FailureRatio = invoiceOptions.CircuitFailureRatio,
+        SamplingDuration = TimeSpan.FromSeconds(30),
+
+        // Judged only after a few calls, so a single unlucky failure on a quiet
+        // service does not trip it.
+        MinimumThroughput = invoiceOptions.CircuitMinimumThroughput,
+
+        // Then it half-opens and lets one request through to test the water.
+        BreakDuration = TimeSpan.FromSeconds(invoiceOptions.CircuitBreakSeconds),
+
+        ShouldHandle = new Polly.PredicateBuilder<HttpResponseMessage>()
+            .Handle<HttpRequestException>()
+            .Handle<TaskCanceledException>()
+            .HandleResult(r => (int)r.StatusCode >= 500),
+
+        OnOpened = args =>
+        {
+            Log.Warning("Circuit to rate-service OPENED for {Break}s after {Ratio:P0} failures",
+                args.BreakDuration.TotalSeconds, invoiceOptions.CircuitFailureRatio);
+            return default;
+        },
+        OnClosed = _ =>
+        {
+            Log.Information("Circuit to rate-service CLOSED; the dependency is answering again");
+            return default;
+        },
+        OnHalfOpened = _ =>
+        {
+            Log.Information("Circuit to rate-service HALF-OPEN; probing with a single request");
+            return default;
+        }
+    });
 });
 
 // Money must not be lost, so this call retries rather than failing fast, and

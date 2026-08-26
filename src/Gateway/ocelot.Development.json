@@ -58,6 +58,13 @@
       "DownstreamPathTemplate": "/api/invoices",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5002 } ],
+      "RateLimitOptions": {
+        "EnableRateLimiting": true,
+        "Period": "1m",
+        "PeriodTimespan": 60,
+        "Limit": 30,
+        "ClientWhitelist": []
+      },
       "UpstreamPathTemplate": "/api/invoices",
       "UpstreamHttpMethod": [ "GET", "POST" ]
     },
@@ -65,6 +72,13 @@
       "DownstreamPathTemplate": "/api/invoices/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5002 } ],
+      "RateLimitOptions": {
+        "EnableRateLimiting": true,
+        "Period": "1m",
+        "PeriodTimespan": 60,
+        "Limit": 30,
+        "ClientWhitelist": []
+      },
       "UpstreamPathTemplate": "/api/invoices/{everything}",
       "UpstreamHttpMethod": [ "GET", "POST" ]
     },
@@ -86,6 +100,31 @@
 
   "GlobalConfiguration": {
     "BaseUrl": "http://localhost:5000",
+
+    "//RateLimitOptions": [
+      "Client identity comes from X-Merchant-Id, which the gateway sets itself",
+      "after validating the API key, so the quota is per MERCHANT rather than",
+      "per key or per IP. A merchant with three keys shares one quota, which is",
+      "the honest unit: the limit protects the platform from one customer, not",
+      "from one credential. Per-IP would lump every merchant behind a corporate",
+      "NAT into a single bucket.",
+      "",
+      "Limits apply to the invoice write path only. Rates are public market data",
+      "that a checkout page polls legitimately every few seconds.",
+      "",
+      "Note the gap this leaves: unauthenticated requests are rejected by the",
+      "API key middleware before Ocelot ever sees them, so they carry no",
+      "X-Merchant-Id and are never rate limited here. Someone brute forcing keys",
+      "is throttled by nothing at this layer. Every rejection is logged as",
+      "API_KEY_INVALID with its source address, so the SOC layer can see it, but",
+      "detection is not prevention and the report says so."
+    ],
+    "RateLimitOptions": {
+      "ClientIdHeader": "X-Merchant-Id",
+      "DisableRateLimitHeaders": false,
+      "QuotaExceededMessage": "Rate limit exceeded. Slow down and retry after the period resets.",
+      "HttpStatusCode": 429
+    },
     "RequestIdKey": "X-Correlation-Id"
   }
 }
