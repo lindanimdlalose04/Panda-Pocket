@@ -5,10 +5,6 @@ namespace PandaPocket.Services.Invoice.Contracts;
 
 /// <summary>
 /// What a merchant's system POSTs to create an invoice.
-///
-/// MerchantId is supplied in the body only until day 4, when the gateway
-/// resolves it from a validated API key and a client can no longer assert who it
-/// is. It is marked accordingly so the change is not forgotten.
 /// </summary>
 public sealed class CreateInvoiceRequest
 {
@@ -24,12 +20,11 @@ public sealed class CreateInvoiceRequest
     [StringLength(20, MinimumLength = 2)]
     public string Asset { get; set; } = "BTC";
 
-    /// <summary>
-    /// TEMPORARY. Replaced on day 4 by the merchant identity the gateway derives
-    /// from the API key. A production gateway must never let a caller choose
-    /// which merchant it is acting as.
-    /// </summary>
-    public Guid? MerchantId { get; set; }
+    // MerchantId is deliberately absent. It was here until day 4, and removing
+    // it is the point: a caller must never be able to choose which merchant it
+    // is acting as. The identity now comes from the API key the gateway
+    // validated, carried on X-Merchant-Id, and a client cannot forge that
+    // because the gateway strips the header from every inbound request first.
 }
 
 public sealed class RecordPaymentRequest

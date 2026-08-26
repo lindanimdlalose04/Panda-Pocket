@@ -1,0 +1,177 @@
+### Panda Pocket - Merchant service, accounts and authentication
+###
+### Two credential types, deliberately not interchangeable:
+###
+###   API key  a merchant's SERVER calling the invoice API. Long lived, because
+###            a server cannot retype a password. Sent as X-API-Key.
+###   JWT      a PERSON signing in to the dashboard. Short lived, because a
+###            browser session should not outlive the human. Sent as Bearer.
+###
+### Letting an API key manage API keys would mean a leaked key could mint
+### replacements for itself and revoke the real ones, so key management is
+### behind the JWT and only the JWT.
+
+@gw = http://localhost:5000
+@merchant = http://localhost:5001
+
+### ---------------------------------------------------------------------------
+### The 401 demonstration. This is the day 4 acceptance test.
+### ---------------------------------------------------------------------------
+
+### No key at all. 401 from the GATEWAY: the request never reaches Invoice.
+POST {{gw}}/api/invoices
+Content-Type: application/json
+
+{ "amountZar": 250, "reference": "NO-KEY-001", "asset": "BTC" }
+
+### A key that does not exist. Also 401, with the same message. The response
+### never distinguishes "no such key" from "revoked key", because doing so would
+### tell an attacker which of their guesses had once been real.
+POST {{gw}}/api/invoices
+Content-Type: application/json
+X-API-Key: pk_live_thiskeydoesnotexistatall000000000000000
+
+{ "amountZar": 250, "reference": "BAD-KEY-001", "asset": "BTC" }
+
+### The seeded demo key. 201.
+POST {{gw}}/api/invoices
+Content-Type: application/json
+X-API-Key: pk_live_demo0000000000000000000000000000000000
+
+{ "amountZar": 250, "reference": "GOOD-KEY-001", "asset": "BTC" }
+
+### ---------------------------------------------------------------------------
+### Header forgery, which is the attack this design exists to stop.
+###
+### X-Merchant-Id is how Invoice knows who is calling. If a client could set it,
+### a valid key for merchant A would let you create invoices billed to merchant
+### B, and then read B's invoices back.
+###
+### The gateway strips this header from every inbound request BEFORE
+### authenticating, then sets it itself from the validated key. So the header
+### below is discarded and the invoice belongs to the demo merchant, not to the
+### GUID asserted here. Compare the merchantId in the response.
+### ---------------------------------------------------------------------------
+POST {{gw}}/api/invoices
+Content-Type: application/json
+X-API-Key: pk_live_demo0000000000000000000000000000000000
+X-Merchant-Id: 99999999-9999-9999-9999-999999999999
+
+{ "amountZar": 99, "reference": "FORGED-HEADER-001", "asset": "BTC" }
+
+### ---------------------------------------------------------------------------
+### Registration and dashboard login
+### ---------------------------------------------------------------------------
+
+### Sign-up is necessarily anonymous: there is no account to authenticate against
+### yet. 201.
+POST {{gw}}/api/merchants
+Content-Type: application/json
+
+{
+  "businessName": "Second Coffee Shop",
+  "email": "owner@secondcoffee.co.za",
+  "password": "another-password-456",
+  "feePercent": 1.5
+}
+
+### Log in. Returns a JWT carrying the merchant id as a signed claim, which is
+### what makes it unforgeable: change the claim and the signature no longer
+### verifies.
+# @name login
+POST {{gw}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "owner@democoffee.co.za",
+  "password": "demo-password-123"
+}
+
+### Wrong password. 401, and the same message as an unknown email.
+### The service also verifies the password against a dummy hash when no user is
+### found, so an unknown email takes the same time as a known one. Returning
+### early would make login an oracle for enumerating valid accounts by timing.
+POST {{gw}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "owner@democoffee.co.za",
+  "password": "wrong-password"
+}
+
+### ---------------------------------------------------------------------------
+### API key management, JWT protected
+###
+### Paste the token from the login response above.
+### ---------------------------------------------------------------------------
+@token = PASTE_TOKEN_HERE
+@merchantId = 11111111-1111-1111-1111-111111111111
+
+### Issue a key. The plaintext appears in this response and NOWHERE ELSE, ever.
+### Only a SHA-256 hash is stored, so a dump of the api_keys table yields nothing
+### usable. That is also why the "show me my key again" button every merchant
+### asks for cannot exist: losing a key means issuing a new one.
+POST {{gw}}/api/merchants/{{merchantId}}/api-keys
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{ "label": "production server" }
+
+### List keys. Prefixes only. There is no code path anywhere that returns a key.
+GET {{gw}}/api/merchants/{{merchantId}}/api-keys
+Authorization: Bearer {{token}}
+
+### Another merchant's record. 403, not 404.
+### The resource exists and the caller is authenticated; what they lack is
+### authorisation, which is exactly what Forbidden means. The merchant id is read
+### from the signed token, never from the URL, so changing the GUID below cannot
+### grant access.
+GET {{gw}}/api/merchants/99999999-9999-9999-9999-999999999999
+Authorization: Bearer {{token}}
+
+### No token at all. 401.
+GET {{gw}}/api/merchants/{{merchantId}}/api-keys
+
+### Revoke a key. 204. Replace the id with one from the list above.
+### The row is marked, not deleted: "which key signed this transaction" stays
+### answerable after the key is retired.
+DELETE {{gw}}/api/api-keys/00000000-0000-0000-0000-000000000000
+Authorization: Bearer {{token}}
+
+### Changing the webhook URL raises MERCHANT_WEBHOOK_URL_CHANGED in Seq.
+### That event is in the catalogue on purpose: repointing where payment
+### notifications are delivered is a classic account takeover step, because the
+### real merchant stops hearing about payments and the attacker starts.
+PUT {{gw}}/api/merchants/{{merchantId}}
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{ "webhookUrl": "https://example.com/new-webhook-endpoint" }
+
+### ---------------------------------------------------------------------------
+### Internal
+###
+### This endpoint is NOT routed through Ocelot, so it is unreachable from
+### outside the compose network. A public key-validation endpoint would be an
+### oracle letting anyone test guessed keys at will. Reachable here only because
+### 5001 is published for development.
+### ---------------------------------------------------------------------------
+POST {{merchant}}/api/internal/keys/validate
+Content-Type: application/json
+
+{ "apiKey": "pk_live_demo0000000000000000000000000000000000" }
+
+### Proof it is not exposed: the same call through the gateway is rejected by the
+### API key middleware before routing is even considered, so it returns 401. Even
+### with a valid key it would then fail to match any Ocelot route. Two
+### independent reasons it cannot be reached from outside.
+POST {{gw}}/api/internal/keys/validate
+Content-Type: application/json
+
+{ "apiKey": "pk_live_demo0000000000000000000000000000000000" }
+
+### Health, and the OpenAPI document.
+GET {{merchant}}/health
+
+###
+GET {{merchant}}/swagger/v1/swagger.json

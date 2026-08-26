@@ -13,13 +13,6 @@ public static class InvoiceEndpoints
 {
     private const int MaxPageSize = 100;
 
-    /// <summary>
-    /// Stands in for the merchant the gateway will resolve from an API key on
-    /// day 4. Until then a request may name its own merchant, and this is the
-    /// fallback when it does not.
-    /// </summary>
-    private static readonly Guid DemoMerchantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
-
     public static IEndpointRouteBuilder MapInvoiceEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/invoices").WithTags("Invoices");
@@ -37,9 +30,12 @@ public static class InvoiceEndpoints
 
             var correlationId = ctx.GetCorrelationId();
 
-            // Day 4 replaces this with the merchant id the gateway puts on the
-            // request after validating the API key.
-            var merchantId = ResolveMerchantId(ctx, request.MerchantId);
+            if (ResolveMerchantId(ctx) is not { } merchantId)
+            {
+                return Problem("Unauthenticated",
+                    "No merchant identity on the request. Call through the gateway with a valid X-API-Key.",
+                    StatusCodes.Status401Unauthorized);
+            }
 
             var result = await service.CreateAsync(
                 merchantId, request.Reference, request.AmountZar, request.Asset, correlationId, ct);
@@ -68,26 +64,40 @@ public static class InvoiceEndpoints
         .WithSummary("Create an invoice, locking a conversion rate for the payment window")
         .Produces<InvoiceResponse>(StatusCodes.Status201Created)
         .ProducesProblem(StatusCodes.Status400BadRequest)
+        .ProducesProblem(StatusCodes.Status401Unauthorized)
         .ProducesProblem(StatusCodes.Status409Conflict)
         .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // -------------------------------------------------------------------
         // Read one
         // -------------------------------------------------------------------
-        group.MapGet("/{id:guid}", async (Guid id, InvoiceDbContext db, CancellationToken ct) =>
+        group.MapGet("/{id:guid}", async (Guid id, InvoiceDbContext db, HttpContext ctx, CancellationToken ct) =>
         {
             var invoice = await db.Invoices
                 .AsNoTracking()
                 .Include(i => i.Payments)
                 .FirstOrDefaultAsync(i => i.Id == id, ct);
 
-            return invoice is null
-                ? Problem("Invoice not found", $"No invoice with id {id}.", StatusCodes.Status404NotFound)
-                : Results.Ok(InvoiceResponse.From(invoice));
+            if (invoice is null)
+            {
+                return Problem("Invoice not found", $"No invoice with id {id}.", StatusCodes.Status404NotFound);
+            }
+
+            // 403 when the invoice belongs to someone else. Without this check an
+            // authenticated merchant could read every other merchant's invoices
+            // simply by trying ids, which is a data breach rather than a bug.
+            if (ResolveMerchantId(ctx) is { } caller && invoice.MerchantId != caller)
+            {
+                return Problem("Forbidden", "This invoice belongs to another merchant.",
+                    StatusCodes.Status403Forbidden);
+            }
+
+            return Results.Ok(InvoiceResponse.From(invoice));
         })
         .WithName("GetInvoice")
         .WithSummary("Fetch a single invoice, including how much has been received")
         .Produces<InvoiceResponse>()
+        .ProducesProblem(StatusCodes.Status403Forbidden)
         .ProducesProblem(StatusCodes.Status404NotFound);
 
         // -------------------------------------------------------------------
@@ -99,6 +109,7 @@ public static class InvoiceEndpoints
             int? page,
             int? pageSize,
             InvoiceDbContext db,
+            HttpContext ctx,
             CancellationToken ct) =>
         {
             // Nullable on purpose. A non-nullable int is a *required* query
@@ -110,7 +121,21 @@ public static class InvoiceEndpoints
 
             var query = db.Invoices.AsNoTracking().Include(i => i.Payments).AsQueryable();
 
-            if (merchantId is { } m) query = query.Where(i => i.MerchantId == m);
+            // The merchantId query parameter is accepted for interface
+            // compatibility and then ignored in favour of the authenticated
+            // identity. Honouring it would let any merchant list any other
+            // merchant's invoices just by passing a different GUID, which is the
+            // classic broken-object-level-authorisation flaw. It is filtered
+            // here rather than removed from the signature so that an integrator
+            // passing their own id still gets what they expect.
+            if (ResolveMerchantId(ctx) is { } caller)
+            {
+                query = query.Where(i => i.MerchantId == caller);
+            }
+            else if (merchantId is { } m)
+            {
+                query = query.Where(i => i.MerchantId == m);
+            }
 
             if (!string.IsNullOrWhiteSpace(status))
             {
@@ -154,6 +179,12 @@ public static class InvoiceEndpoints
 
             var result = await service.RecordPaymentAsync(
                 id, request.TxHash, request.AmountCrypto, ctx.GetCorrelationId(), ct);
+
+            if (result.Invoice is { } inv && ResolveMerchantId(ctx) is { } payer && inv.MerchantId != payer)
+            {
+                return Problem("Forbidden", "This invoice belongs to another merchant.",
+                    StatusCodes.Status403Forbidden);
+            }
 
             return result.Outcome switch
             {
@@ -263,14 +294,24 @@ public static class InvoiceEndpoints
         return app;
     }
 
-    private static Guid ResolveMerchantId(HttpContext ctx, Guid? fromBody)
+    /// <summary>
+    /// The merchant identity comes from the gateway and from nowhere else.
+    ///
+    /// Until day 4 this fell back to a value in the request body, which was fine
+    /// while nothing was authenticated and is a privilege escalation now: a
+    /// caller who could name their own merchant could create invoices billed to
+    /// somebody else's account, and later read that account's invoices.
+    ///
+    /// The gateway strips any inbound X-Merchant-Id before authenticating, then
+    /// sets it from the API key it validated, so by the time a request arrives
+    /// here the header is an assertion by the gateway rather than by the client.
+    /// A request without one never passed through authentication, and is refused
+    /// rather than defaulted.
+    /// </summary>
+    private static Guid? ResolveMerchantId(HttpContext ctx)
     {
-        // The gateway will set this header once API keys exist. Reading it now
-        // means day 4 is a change at the gateway rather than a change here.
         var header = ctx.Request.Headers[CorrelationHeaders.MerchantId].FirstOrDefault();
-        if (Guid.TryParse(header, out var fromHeader)) return fromHeader;
-
-        return fromBody ?? DemoMerchantId;
+        return Guid.TryParse(header, out var merchantId) ? merchantId : null;
     }
 
     private static IResult Problem(string title, string? detail, int statusCode) =>

@@ -83,5 +83,8 @@ public sealed class InvoiceDbContext(DbContextOptions<InvoiceDbContext> options)
             // session across services.
             e.HasIndex(x => x.CorrelationId).HasDatabaseName("ix_status_history_correlation");
         });
+
+        // Last, so anything named explicitly above is left alone.
+        b.ApplySnakeCaseNames();
     }
 }

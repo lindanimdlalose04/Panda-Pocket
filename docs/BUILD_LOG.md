@@ -422,3 +422,199 @@ pp-rate       running (healthy)   5003->8080    Rate service
 pp-invoice    running (healthy)   5002->8080    Invoice service
 pp-gateway    running (healthy)   5000->8080    Ocelot gateway + client
 ```
+
+---
+
+## Day 4, Tuesday 25 August 2026 - Merchant service and authentication
+
+### Built
+
+- Merchant service: accounts, hashed API keys, dashboard users, JWT login, key
+  issue and revoke, and an internal key-validation endpoint.
+- API key middleware in the gateway, with a short-lived cache of validated keys.
+- Invoice reworked so merchant identity comes only from the gateway, with reads
+  and payments scoped to the authenticated merchant.
+- Demo merchant seeded at startup so the stack is usable from a clean clone.
+- API key field in the client, and `requests/merchant.http`.
+- snake_case column naming across both schemas.
+
+### Done when
+
+- [x] An unauthenticated create returns 401 and an authenticated one succeeds
+
+### The decision the whole day rests on
+
+**A client must never be able to say which merchant it is.** Until today the
+Invoice service would read a merchant id from the request body. That was
+harmless while nothing was authenticated and is a privilege escalation the
+moment anything is: a caller naming their own merchant could bill invoices to
+another account and then read that account's invoices back.
+
+Two things now make `X-Merchant-Id` trustworthy, and **both** are required:
+
+1. The gateway **strips** the header from every inbound request before it does
+   anything else. Without this, holding any valid key would be enough to act as
+   any merchant, because the key would be genuinely yours and the header would
+   name somebody else.
+2. The gateway then sets it from the key it validated against the Merchant
+   service, which owns that data. The gateway never reads the merchant database.
+
+Invoice refuses a request with no merchant identity rather than defaulting to
+one. Verified: a request carrying a valid key and a forged
+`X-Merchant-Id: 99999999-...` produces an invoice belonging to the demo
+merchant, not the asserted GUID.
+
+### Decisions
+
+**Two credential types, deliberately not interchangeable.** An API key
+authenticates a merchant's *server* and is long lived, because a server cannot
+retype a password. A JWT authenticates a *person* and expires in an hour,
+because a browser session should not outlive the human. Key management sits
+behind the JWT and only the JWT: if an API key could manage API keys, a leaked
+key could mint replacements for itself and revoke the real ones, locking the
+merchant out of their own account.
+
+**Fast hash for keys, slow hash for passwords.** API keys are 256 bits from a
+cryptographic RNG, so there is no dictionary to attack and SHA-256 is correct;
+the hash is computed on every authenticated request, where PBKDF2 at 100 000
+iterations would add real latency to every API call. Passwords are low entropy
+and human chosen, so they get PBKDF2 with a per-user salt, computed once per
+login. Using one algorithm for both would be wrong in one direction or the other.
+
+**`RandomNumberGenerator`, not `Random`.** `Random` is a deterministic generator
+seeded from the clock: predict the seed and you predict every key it will ever
+issue. Fine for simulating a Bitcoin price, catastrophic for issuing
+credentials. The same codebase does both, which is exactly why the distinction
+is commented where it is made.
+
+**Failed logins are constant-time.** The password is verified against a dummy
+PBKDF2 hash even when no user was found. Returning early on an unknown email
+makes the response measurably faster than for a known one, which turns login
+into an oracle for enumerating valid accounts by timing alone.
+
+**Authentication failures never say why.** "No such key" and "revoked key"
+return the same message, because distinguishing them tells an attacker which of
+their guesses had once been real.
+
+**403 for another merchant's resource, not 404.** The resource exists and the
+caller is authenticated; what they lack is authorisation. Hiding existence would
+be worth it against guessable ids, but these are v4 GUIDs, so there is nothing
+to enumerate and the honest code is more useful to an integrator.
+
+**Validated keys are cached for 30 seconds.** Otherwise every API call becomes
+two network hops and a database read. The trade is that a revoked key keeps
+working for up to that long, which is why the window is short. Failures are
+never cached, so brute forcing gets no cheaper and a newly issued key never
+appears broken.
+
+**Key validation fails closed.** If the Merchant service is unreachable the
+gateway refuses the request. Failing open would mean an outage in one service
+silently removing authentication from the entire system.
+
+**The validation endpoint is not routed through Ocelot.** A public
+`/keys/validate` would be an oracle letting anyone test guessed keys at will. It
+is reachable only from inside the compose network.
+
+**Rates stay public.** A checkout page must show a price before anyone has
+authenticated and nothing about a rate is merchant-specific, so requiring a
+credential would protect nothing while forcing the browser to hold a key just to
+draw a number. BitPay and Coinbase Commerce both publish theirs openly.
+
+**API keys are returned exactly once.** Only the SHA-256 hash is stored, so the
+"show me my key again" button every merchant asks for cannot exist. Losing a key
+means issuing a new one and revoking the old. Demonstrable: the raw `api_keys`
+table is in the evidence file and contains nothing usable.
+
+### snake_case column naming
+
+EF Core names columns after .NET properties, so the tables had `KeyPrefix` and
+`MerchantId`. In Postgres those are case-sensitive and need double-quoting in
+every hand-written query, and worse, the live schema disagreed with the data
+model documented in the report.
+
+A naming convention now rewrites columns, keys, foreign keys and indexes to
+snake_case, applied at the end of `OnModelCreating` so explicit names still win.
+EF generated rename migrations rather than drops, so existing data survived.
+
+Done today rather than later on purpose. Settlement adds a third schema
+tomorrow, so fixing two contexts now is cheaper than fixing three on day 6, and
+the working rules bar refactoring after day 6 entirely.
+
+### A wasted hour worth recording
+
+The 401 test kept returning 201 against what looked like a correctly built
+stack. The cause was that a batched `docker compose build` had timed out and
+Docker Desktop restarted mid-build, so `docker compose up` cheerfully started
+**four-hour-old images** while reporting every container healthy. Healthy means
+the process answers its health endpoint, not that it is running the code just
+written.
+
+Checking image age with `docker images` and its CreatedSince column is the fix,
+and it is worth doing before concluding that a security control is broken.
+Building one image per command, rather than three in one, also avoids the
+timeout that caused it.
+
+### Addendum: the stale-build failure recurred, and it is worth understanding
+
+The wasted hour recorded above happened a second time, in a nastier form, and
+the pattern is worth recognising before the demo.
+
+A `docker compose build` covering three services was started, timed out at the
+tool level, and kept running in the background. Roughly forty minutes later,
+long after the snake_case work had been finished, built and verified, that
+queued build **completed and overwrote the correct images with ones built from
+an older source snapshot**. It then recreated the containers.
+
+The symptom was not an obvious failure. Postgres held correctly renamed
+snake_case columns, because the migration had genuinely run and the rename is
+persistent. But the Merchant assembly now running was the pre-convention build,
+so its queries asked for `m."Id"` against a table whose column is `id`:
+
+```
+Npgsql.PostgresException 42703: column m.Id does not exist
+```
+
+Every container reported healthy throughout, because `/health` only proves the
+process is alive and can reach its database, not that the code matches the
+schema. The visible effect was that a valid API key started returning 401, which
+looks like an authentication bug and is actually a stale binary.
+
+Three things to take from it:
+
+**Never leave a long build running in the background while continuing to edit.**
+A build that finishes later than you expect can silently replace newer images
+with older ones. Build one service per command, in the foreground.
+
+**Healthy does not mean current.** Check what is actually running:
+`docker images` with its CreatedSince column, and compare
+`docker inspect <container> --format '{{.Image}}'` against the tagged image id.
+
+**A schema and a binary can disagree.** Migrations persist; images do not
+necessarily. When a database error names a column that clearly exists, suspect
+the code rather than the database.
+
+Recovery was `docker compose build --no-cache` per service, then
+`docker start`, and re-running the acceptance tests. `--no-cache` was used
+deliberately rather than a plain rebuild, to guarantee no cached layer from the
+bad build survived.
+
+One further quirk observed on this machine: `docker compose up -d
+--force-recreate` sometimes leaves containers in `created` state without
+starting them, and the command hangs. `docker start <name>` completes
+immediately and is the reliable fallback.
+
+### Verified state at end of day 4
+
+```
+pp-postgres   running (healthy)   5432->5432    PostgreSQL 16.15
+pp-mongo      running (healthy)   27018->27017  MongoDB 7
+pp-seq        running             5341->80      Seq 2026.1.17114
+pp-rate       running (healthy)   5003->8080    Rate service
+pp-merchant   running (healthy)   5001->8080    Merchant service
+pp-invoice    running (healthy)   5002->8080    Invoice service
+pp-gateway    running (healthy)   5000->8080    Ocelot gateway + client
+```
+
+Security events reaching Seq from both Gateway and Merchant: `AUTH_FAILED` and
+`API_KEY_INVALID`, each carrying correlation id, path, method and remote IP,
+which is the shape the SOC layer will ingest.

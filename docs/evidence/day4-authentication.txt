@@ -1,0 +1,48 @@
+Panda Pocket - authentication verification (day 4)
+Captured: 2026-08-25 23:06 UTC
+
+=== containers ===
+NAME          STATE     STATUS
+pp-gateway    running   Up 55 seconds (healthy)
+pp-invoice    running   Up About a minute (healthy)
+pp-merchant   running   Up About a minute (healthy)
+pp-mongo      running   Up 15 minutes (healthy)
+pp-postgres   running   Up 15 minutes (healthy)
+pp-rate       running   Up 14 minutes (healthy)
+pp-seq        running   Up 15 minutes
+
+=== ACCEPTANCE TEST: unauthenticated create refused, authenticated succeeds ===
+  no API key           -> HTTP 401 (expect 401)
+  invalid API key      -> HTTP 401 (expect 401)
+  valid API key        -> HTTP 201 (expect 201)
+
+  Both rejections return an identical message. Distinguishing 'no such key'
+  from 'revoked key' would tell an attacker which guesses had once been real.
+
+=== HEADER FORGERY IS DEFEATED ===
+  Request carries a VALID key AND a forged X-Merchant-Id.
+  asserted by client   : 99999999-9999-9999-9999-999999999999
+  actual merchantId    : 11111111-1111-1111-1111-111111111111
+  RESULT               : stripped and replaced by the gateway
+
+=== dashboard authentication ===
+  correct password     -> JWT issued (501 chars)
+  wrong password       -> HTTP 401 (expect 401)
+  unknown email        -> HTTP 401 (expect 401, identical response and timing)
+  another merchant     -> HTTP 403 (expect 403)
+  no token             -> HTTP 401 (expect 401)
+
+=== API keys are stored only as hashes ===
+  Raw contents of api_keys, straight from Postgres:
+    key_prefix    |        key_hash         |       label       | active 
+------------------+-------------------------+-------------------+--------
+ pk_live_demo0000 | b480d797bf4b30a7d209... | demo client       | t
+ pk_live_vOKkSElc | 05e8b20dc1332f18eb41... | production server | t
+(2 rows)
+
+  No column holds a usable credential. A dump of this table yields nothing.
+
+=== internal key-validation endpoint is not publicly reachable ===
+  POST /api/internal/keys/validate through the gateway -> HTTP 401
+  Rejected by the API key middleware before routing; and even with a valid
+  key there is no Ocelot route for /api/internal.

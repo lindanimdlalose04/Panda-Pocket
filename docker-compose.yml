@@ -129,6 +129,43 @@ services:
     networks: [pandapocket]
 
   # ---------------------------------------------------------------------------
+  # Merchant: accounts, hashed API keys and dashboard authentication.
+  #
+  # Its /api/internal/keys/validate endpoint is not routed through Ocelot, so it
+  # is reachable only from inside this network. A publicly exposed key-validation
+  # endpoint would be an oracle letting anyone test guessed keys at will.
+  # ---------------------------------------------------------------------------
+  merchant-service:
+    build:
+      context: .
+      dockerfile: src/Services/Merchant.Api/Dockerfile
+    container_name: pp-merchant
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: 8080
+      ConnectionStrings__MerchantDb: "Host=postgres;Port=5432;Database=merchant_db;Username=merchant_svc;Password=merchant_pw_dev"
+      Seq__ServerUrl: http://seq:5341
+      # A committed signing key is exactly as good as no authentication, because
+      # anyone holding it can mint a token for any merchant. It is overridden
+      # here to make the point that it belongs in the environment, and in a real
+      # deployment this value would come from a secret store rather than a file.
+      Jwt__SigningKey: "panda-pocket-compose-signing-key-still-not-a-secret"
+    ports:
+      - "5001:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      seq:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [pandapocket]
+
+  # ---------------------------------------------------------------------------
   # Invoice: the payment lifecycle and the state machine.
   #
   # Applies its own EF Core migrations at startup, so a clean clone plus
@@ -179,12 +216,17 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_HTTP_PORTS: 8080
       Seq__ServerUrl: http://seq:5341
+      # Used by the API key middleware. A compose service name, like every other
+      # service-to-service call in the system.
+      Services__MerchantBaseUrl: http://merchant-service:8080
     ports:
       - "5000:8080"
     depends_on:
       invoice-service:
         condition: service_healthy
       rate-service:
+        condition: service_healthy
+      merchant-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]

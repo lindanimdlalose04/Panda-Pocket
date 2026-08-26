@@ -1,3 +1,4 @@
+using PandaPocket.Gateway.Authentication;
 using Ocelot.DependencyInjection;
 using Ocelot.Middleware;
 using PandaPocket.Shared.Contracts.Observability;
@@ -33,6 +34,21 @@ builder.Configuration
 
 builder.Services.AddOcelot(builder.Configuration);
 
+// Used by the API key middleware to reach the Merchant service. The base
+// address is a compose service name, resolved by Docker DNS like every other
+// service-to-service call.
+builder.Services.AddHttpClient("merchant", client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["Services:MerchantBaseUrl"] ?? "http://localhost:5001");
+
+    // Short, because this sits in front of every authenticated request. A slow
+    // Merchant service should produce a fast rejection, not a hung API.
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+
+// Backs the short-lived cache of validated keys.
+builder.Services.AddMemoryCache();
+
 // The browser client is served from the gateway's own origin, so its fetch
 // calls are same-origin and no CORS configuration is needed. That is a
 // deliberate simplification: the alternative is opening CORS on four services.
@@ -56,6 +72,11 @@ app.UseSerilogRequestLogging();
 // checkout rather than a 404.
 app.UseDefaultFiles();
 app.UseStaticFiles();
+
+// Authentication sits between the static files and Ocelot: the client itself is
+// public, everything it calls is not. This middleware also strips any inbound
+// X-Merchant-Id, which is what allows downstream services to trust that header.
+app.UseApiKeyAuthentication();
 
 // The gateway's own liveness.
 //

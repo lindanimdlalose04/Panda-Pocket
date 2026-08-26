@@ -74,6 +74,18 @@
     </div>
 
     <div class="card" style="margin-top:18px">
+      <h2>API key</h2>
+      <label for="apikey">X-API-Key sent with every invoice call</label>
+      <input id="apikey" type="text" spellcheck="false" class="mono">
+      <div class="note" style="margin-top:8px">
+        Stored in this browser only. In a real integration the key lives on the
+        merchant's server, never in a page: anything in client JavaScript is
+        readable by the customer. This field exists so the 401 is demonstrable.
+      </div>
+      <button class="ghost" onclick="clearKey()">Clear key (to see the 401)</button>
+    </div>
+
+    <div class="card" style="margin-top:18px">
       <h2>Create invoice</h2>
       <label for="amount">Amount (ZAR)</label>
       <input id="amount" type="number" value="250" min="1" step="0.01">
@@ -120,6 +132,35 @@ const log = (msg, cls = 'note') => {
   document.getElementById('log').innerHTML = `<span class="${cls}">${msg}</span>`;
 };
 
+// The seeded demo key, so the page works from a clean clone with nothing to
+// configure. Every other key in the system is 256 bits from a cryptographic
+// RNG; this one is a fixed seed value, documented as the deliberate exception.
+const DEMO_KEY = 'pk_live_demo0000000000000000000000000000000000';
+
+function getKey() {
+  // localStorage can throw in a private window or with site data blocked, so
+  // every access is guarded and falls back rather than breaking the page.
+  try { return localStorage.getItem('pp_api_key') ?? DEMO_KEY; }
+  catch { return DEMO_KEY; }
+}
+
+function setKey(value) {
+  try { localStorage.setItem('pp_api_key', value); } catch { /* not fatal */ }
+}
+
+function clearKey() {
+  document.getElementById('apikey').value = '';
+  setKey('');
+  log('Key cleared. The next create will return 401 from the gateway.', 'note');
+}
+
+// Every authenticated call goes through here, so there is exactly one place the
+// key is attached and one place to change if the scheme ever does.
+function authHeaders(extra = {}) {
+  const key = document.getElementById('apikey').value.trim();
+  return key ? { ...extra, 'X-API-Key': key } : extra;
+}
+
 const money = n => 'R' + Number(n).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 async function createInvoice() {
@@ -135,7 +176,7 @@ async function createInvoice() {
   try {
     const res = await fetch(`${API}/api/invoices`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(body)
     });
 
@@ -149,6 +190,8 @@ async function createInvoice() {
       document.getElementById('reference').value = '';
     } else if (res.status === 409) {
       log(`${data.title}: ${data.detail}`, 'err');
+    } else if (res.status === 401) {
+      log(`401 Unauthorized: ${data.detail || 'The gateway rejected the API key.'}`, 'err');
     } else if (res.status === 503) {
       log(`${data.title}: ${data.detail}`, 'err');
     } else {
@@ -169,7 +212,7 @@ async function pay(id, cryptoAmount, shortPay) {
 
   const res = await fetch(`${API}/api/invoices/${id}/payments`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ txHash, amountCrypto: amount })
   });
 
@@ -190,7 +233,7 @@ async function replay(id) {
 
   const res = await fetch(`${API}/api/invoices/${id}/payments`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ txHash: window.lastTxHash, amountCrypto: 0.001 })
   });
 
@@ -202,7 +245,7 @@ async function replay(id) {
 async function cancel(id) {
   const res = await fetch(`${API}/api/invoices/${id}/cancel`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ reason: 'Cancelled from the demo client' })
   });
 
@@ -230,7 +273,7 @@ let lastSignature = '';
 
 async function refresh() {
   try {
-    const res = await fetch(`${API}/api/invoices?pageSize=15`);
+    const res = await fetch(`${API}/api/invoices?pageSize=15`, { headers: authHeaders() });
     const data = await res.json();
     const rows = document.getElementById('rows');
 
@@ -297,6 +340,10 @@ setInterval(() => {
 
 setInterval(loadRates, 5000);
 setInterval(refresh, 15000);
+
+// Prefill the key and remember any edit.
+document.getElementById('apikey').value = getKey();
+document.getElementById('apikey').addEventListener('change', e => setKey(e.target.value.trim()));
 
 loadRates();
 refresh();

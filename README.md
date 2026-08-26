@@ -17,15 +17,30 @@ docker compose up -d
 That brings up the three backing stores. Application services are added to the
 compose file as they are built.
 
-| Service     | URL                     | Notes                              |
-|-------------|-------------------------|------------------------------------|
-| **Client**  | http://localhost:5000   | start here                         |
-| Gateway     | http://localhost:5000   | Ocelot, the only public entry point |
-| Invoice API | http://localhost:5002   | `/swagger` for the API docs        |
-| Rate API    | http://localhost:5003   | `/swagger` for the API docs        |
-| Seq         | http://localhost:5341   | logs, auth disabled, see compose   |
-| Postgres    | `localhost:5432`        | see `infra/postgres/init.sql`      |
-| MongoDB     | `localhost:27018`       | `rate_svc` / `rate_pw_dev`         |
+| Service      | URL                     | Notes                               |
+|--------------|-------------------------|-------------------------------------|
+| **Client**   | http://localhost:5000   | start here                          |
+| Gateway      | http://localhost:5000   | Ocelot, the only public entry point |
+| Merchant API | http://localhost:5001   | `/swagger` for the API docs         |
+| Invoice API  | http://localhost:5002   | `/swagger` for the API docs         |
+| Rate API     | http://localhost:5003   | `/swagger` for the API docs         |
+| Seq          | http://localhost:5341   | logs, auth disabled, see compose    |
+| Postgres     | `localhost:5432`        | see `infra/postgres/init.sql`       |
+| MongoDB      | `localhost:27018`       | `rate_svc` / `rate_pw_dev`          |
+
+### Seeded demo account
+
+Created automatically on first start so the stack is usable immediately:
+
+| | |
+|---|---|
+| Dashboard login | `owner@democoffee.co.za` / `demo-password-123` |
+| API key | `pk_live_demo0000000000000000000000000000000000` |
+
+That key is a fixed seed value, and the only one in the system that is not 256
+bits from a cryptographic RNG. It exists so the client works from a clean clone
+with nothing to configure. Every key, including this one, is stored only as a
+SHA-256 hash.
 
 Open **http://localhost:5000** and the client is there: create an invoice, watch
 the countdown, pay it, underpay it, replay a transaction. Every call it makes
@@ -126,6 +141,47 @@ PandaPocket.sln
 ├─ docs/                      diagrams and report
 └─ docker-compose.yml
 ```
+
+## Authentication
+
+Two credential types, deliberately not interchangeable.
+
+**API keys** authenticate a merchant's *server* calling the invoice API. Long
+lived, because a server cannot retype a password. Sent as `X-API-Key`.
+
+**JWTs** authenticate a *person* on the dashboard. Short lived, because a browser
+session should not outlive the human holding it. Sent as `Authorization: Bearer`.
+
+Key management sits behind the JWT and only the JWT. If an API key could manage
+API keys, a leaked key could mint replacements for itself and revoke the real
+ones, and the merchant would have no way back in.
+
+### How the gateway makes identity trustworthy
+
+Services downstream read the merchant id from `X-Merchant-Id`. Two things make
+that safe, and both are required:
+
+1. The gateway **strips** any inbound `X-Merchant-Id` before doing anything
+   else. Without this, a caller could send their own and act as any merchant,
+   and holding a valid key of their own would not help them be caught.
+2. The gateway then sets it from the API key it just validated against the
+   Merchant service, which owns that data. The gateway never reads the merchant
+   database itself.
+
+Try it. The forged header below is discarded and the invoice belongs to the demo
+merchant, not to the GUID asserted:
+
+```bash
+curl -X POST http://localhost:5000/api/invoices   -H "Content-Type: application/json"   -H "X-API-Key: pk_live_demo0000000000000000000000000000000000"   -H "X-Merchant-Id: 99999999-9999-9999-9999-999999999999"   -d '{"amountZar":99,"reference":"FORGED-1","asset":"BTC"}'
+```
+
+Validated keys are cached for 30 seconds, so a burst of traffic costs one
+validation rather than one per request. The trade is that a revoked key keeps
+working for up to that long, which is why the window is short. Failures are never
+cached, so brute forcing gets no cheaper.
+
+Rates are public on purpose: a checkout page must show a price before anyone has
+authenticated, and nothing about a rate is merchant-specific.
 
 ## The payment flow
 

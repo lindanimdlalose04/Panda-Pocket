@@ -15,6 +15,38 @@
 
   "Routes": [
     {
+      "//": "Dashboard login. Anonymous by necessity: there is no key yet.",
+      "DownstreamPathTemplate": "/api/auth/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5001 } ],
+      "UpstreamPathTemplate": "/api/auth/{everything}",
+      "UpstreamHttpMethod": [ "POST" ]
+    },
+    {
+      "//": "Merchant sign-up. Also necessarily anonymous.",
+      "DownstreamPathTemplate": "/api/merchants",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5001 } ],
+      "UpstreamPathTemplate": "/api/merchants",
+      "UpstreamHttpMethod": [ "POST" ]
+    },
+    {
+      "//": "Merchant record and API key management. JWT protected by the service.",
+      "DownstreamPathTemplate": "/api/merchants/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5001 } ],
+      "UpstreamPathTemplate": "/api/merchants/{everything}",
+      "UpstreamHttpMethod": [ "GET", "PUT", "POST" ]
+    },
+    {
+      "//": "Key revocation.",
+      "DownstreamPathTemplate": "/api/api-keys/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5001 } ],
+      "UpstreamPathTemplate": "/api/api-keys/{everything}",
+      "UpstreamHttpMethod": [ "DELETE" ]
+    },
+    {
       "DownstreamPathTemplate": "/api/invoices",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5002 } ],
