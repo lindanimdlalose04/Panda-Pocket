@@ -1,7 +1,7 @@
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 
-namespace PandaPocket.Services.Merchant.Persistence;
+namespace PandaPocket.Shared.Persistence;
 
 /// <summary>
 /// Renames every column, key and index to snake_case.

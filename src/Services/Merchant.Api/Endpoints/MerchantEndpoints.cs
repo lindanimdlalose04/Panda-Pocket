@@ -194,6 +194,34 @@ public static class MerchantEndpoints
         .WithName("ValidateApiKey")
         .WithSummary("Internal: resolve an API key to a merchant. Not exposed through the gateway.")
         .Produces<ValidateKeyResponse>();
+
+        // Read by Settlement, which needs three things it does not own: the fee
+        // percentage, the webhook URL and the signing secret. Copying those into
+        // settlement_db would be faster and would go stale the moment a merchant
+        // changed their webhook, so they are fetched from the owner instead.
+        //
+        // This returns the webhook secret, which is why it is internal-only and
+        // not routed through Ocelot. Exposing it publicly would let anyone
+        // forge a signed "you have been paid" callback.
+        app.MapGet("/api/internal/merchants/{id:guid}", async (
+            Guid id, MerchantDbContext db, CancellationToken ct) =>
+        {
+            var m = await db.Merchants.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+
+            return m is null
+                ? Results.Problem(title: "Merchant not found", statusCode: StatusCodes.Status404NotFound)
+                : Results.Ok(new
+                {
+                    id = m.Id,
+                    businessName = m.BusinessName,
+                    feePercent = m.FeePercent,
+                    webhookUrl = m.WebhookUrl,
+                    webhookSecret = m.WebhookSecret
+                });
+        })
+        .WithTags("Internal")
+        .WithName("GetMerchantInternal")
+        .WithSummary("Internal: merchant fee and webhook configuration. Not exposed through the gateway.");
     }
 
     // -----------------------------------------------------------------------

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using PandaPocket.Shared.Persistence;
 using PandaPocket.Services.Merchant.Domain;
 
 namespace PandaPocket.Services.Merchant.Persistence;

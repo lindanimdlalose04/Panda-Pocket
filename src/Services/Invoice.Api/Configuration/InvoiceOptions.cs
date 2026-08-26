@@ -27,4 +27,17 @@ public sealed class InvoiceOptions
 
     /// <summary>Seconds before a Rate call is abandoned.</summary>
     public int RateTimeoutSeconds { get; init; } = 5;
+
+    public string SettlementServiceBaseUrl { get; init; } = "http://localhost:5004";
+    public int SettlementTimeoutSeconds { get; init; } = 10;
+
+    /// <summary>How often paid-but-unsettled invoices are swept up.</summary>
+    public int SettlementSweepSeconds { get; init; } = 20;
+
+    /// <summary>
+    /// How long an invoice may sit in Paid before the sweeper treats it as
+    /// stranded. Long enough not to race the inline settlement call that is
+    /// probably still in flight.
+    /// </summary>
+    public int SettlementGraceSeconds { get; init; } = 15;
 }

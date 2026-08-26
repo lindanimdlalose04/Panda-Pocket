@@ -22,6 +22,7 @@ WORKDIR /src
 # editing source does not re-download every NuGet package. Copying everything up
 # front would invalidate the cache on every source change.
 COPY ["src/Shared/Contracts/PandaPocket.Shared.Contracts.csproj", "src/Shared/Contracts/"]
+COPY ["src/Shared/Persistence/PandaPocket.Shared.Persistence.csproj", "src/Shared/Persistence/"]
 COPY ["src/Services/Invoice.Api/PandaPocket.Services.Invoice.csproj", "src/Services/Invoice.Api/"]
 RUN dotnet restore "src/Services/Invoice.Api/PandaPocket.Services.Invoice.csproj"
 

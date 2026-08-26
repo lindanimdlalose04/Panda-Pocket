@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using PandaPocket.Shared.Persistence;
 using PandaPocket.Services.Invoice.Domain;
 
 namespace PandaPocket.Services.Invoice.Persistence;

@@ -1,4 +1,5 @@
 using PandaPocket.Gateway.Authentication;
+using PandaPocket.Gateway.Demo;
 using Ocelot.DependencyInjection;
 using Ocelot.Middleware;
 using PandaPocket.Shared.Contracts.Observability;
@@ -77,6 +78,15 @@ app.UseStaticFiles();
 // public, everything it calls is not. This middleware also strips any inbound
 // X-Merchant-Id, which is what allows downstream services to trust that header.
 app.UseApiKeyAuthentication();
+
+// A test receiver standing in for a merchant's server, so that successful
+// signed delivery can be demonstrated rather than only retries. Mapped before
+// Ocelot for the same reason /health is: Ocelot is terminal middleware.
+//
+// Routing endpoints must be enabled explicitly here, because Ocelot does not
+// use endpoint routing itself.
+app.UseRouting();
+app.UseEndpoints(endpoints => endpoints.MapWebhookSink());
 
 // The gateway's own liveness.
 //

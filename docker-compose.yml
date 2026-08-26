@@ -166,6 +166,42 @@ services:
     networks: [pandapocket]
 
   # ---------------------------------------------------------------------------
+  # Settlement: the merchant ZAR ledger, platform fee income and webhook
+  # delivery with retry.
+  #
+  # The webhook dispatcher runs here as a background worker rather than as a
+  # separate container, because it shares the deliveries table and there is no
+  # need to scale it independently at this size.
+  # ---------------------------------------------------------------------------
+  settlement-service:
+    build:
+      context: .
+      dockerfile: src/Services/Settlement.Api/Dockerfile
+    container_name: pp-settlement
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: 8080
+      ConnectionStrings__SettlementDb: "Host=postgres;Port=5432;Database=settlement_db;Username=settlement_svc;Password=settlement_pw_dev"
+      Services__MerchantBaseUrl: http://merchant-service:8080
+      Seq__ServerUrl: http://seq:5341
+    ports:
+      - "5004:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      merchant-service:
+        condition: service_healthy
+      seq:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [pandapocket]
+
+  # ---------------------------------------------------------------------------
   # Invoice: the payment lifecycle and the state machine.
   #
   # Applies its own EF Core migrations at startup, so a clean clone plus
@@ -182,6 +218,7 @@ services:
       ConnectionStrings__InvoiceDb: "Host=postgres;Port=5432;Database=invoice_db;Username=invoice_svc;Password=invoice_pw_dev"
       # Reached by compose DNS on the service name, never an IP.
       Invoice__RateServiceBaseUrl: http://rate-service:8080
+      Invoice__SettlementServiceBaseUrl: http://settlement-service:8080
       Seq__ServerUrl: http://seq:5341
     ports:
       - "5002:8080"
@@ -189,6 +226,8 @@ services:
       postgres:
         condition: service_healthy
       rate-service:
+        condition: service_healthy
+      settlement-service:
         condition: service_healthy
       seq:
         condition: service_started

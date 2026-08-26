@@ -1,0 +1,169 @@
+### Panda Pocket - Settlement, the ZAR ledger and webhook delivery
+###
+### Settlement owns the merchant's rand balance, the platform's fee income, and
+### delivery of signed notifications to merchant servers.
+###
+### The three call types in this system get three different resilience
+### strategies, and the difference is the point rather than an accident:
+###
+###   Invoice -> Rate       critical path, must not block. Circuit breaker with
+###                         a cached fallback. Better a slightly stale rate than
+###                         a checkout that hangs. (day 6)
+###   Invoice -> Settlement it is money, and must not be lost. Retry, backed by
+###                         an idempotent endpoint so retrying is safe, plus a
+###                         sweeper for anything the inline retries miss.
+###   Settlement -> merchant external and untrusted. Durable queue, exponential
+###                         backoff with jitter, and dead-lettering.
+
+@gw = http://localhost:5000
+@settlement = http://localhost:5004
+@key = pk_live_demo0000000000000000000000000000000000
+@merchantId = 11111111-1111-1111-1111-111111111111
+
+### ---------------------------------------------------------------------------
+### The ledger
+###
+### Settling one R250 invoice writes TWO entries, not one net entry:
+###
+###   Credit  +250.00   balance 250.00
+###   Fee       -2.50   balance 247.50
+###
+### "You were paid R250 and we took R2.50" is a statement a merchant can check.
+### A single R247.50 line hides where the difference went, and makes platform fee
+### income impossible to sum. The amounts are signed so the balance is a plain
+### SUM of the column rather than a conditional that has to know which types
+### subtract.
+### ---------------------------------------------------------------------------
+GET {{gw}}/api/settlements/{{merchantId}}/ledger?pageSize=10
+X-API-Key: {{key}}
+
+### Current position.
+GET {{gw}}/api/settlements/{{merchantId}}/balance
+X-API-Key: {{key}}
+
+### Reconciliation.
+###
+### merchant_balances is a CACHE of ledger_entries: everything in it is
+### derivable by summing the entries, and it exists only so that showing a
+### balance is one row read instead of an aggregate over the merchant's whole
+### history. This endpoint recomputes the sum and compares, which is what proves
+### the cache has not drifted. A mismatch raises a CRITICAL security event.
+GET {{gw}}/api/settlements/{{merchantId}}/reconcile
+X-API-Key: {{key}}
+
+### Another merchant's ledger. 403.
+GET {{gw}}/api/settlements/99999999-9999-9999-9999-999999999999/ledger
+X-API-Key: {{key}}
+
+### ---------------------------------------------------------------------------
+### Settling directly
+###
+### Normally Invoice calls this when a payment is confirmed. Calling it twice
+### for the same invoice returns 200 with the existing settlement rather than
+### 201, and does NOT credit the merchant again.
+###
+### That idempotency is not politeness, it is what makes the retry safe. Invoice
+### retries this call by design, so a duplicate arrival is expected traffic. The
+### unique index on (invoice_id, entry_type) enforces it in the database, which
+### matters because an application-level check can race with itself under
+### concurrent requests and a unique index cannot.
+### ---------------------------------------------------------------------------
+POST {{settlement}}/api/settlements
+Content-Type: application/json
+
+{
+  "invoiceId": "00000000-0000-0000-0000-000000000001",
+  "merchantId": "11111111-1111-1111-1111-111111111111",
+  "amountZar": 250.00,
+  "reference": "MANUAL-SETTLE-001",
+  "asset": "BTC"
+}
+
+### Send it again. 200, not 201, and the balance does not move.
+POST {{settlement}}/api/settlements
+Content-Type: application/json
+
+{
+  "invoiceId": "00000000-0000-0000-0000-000000000001",
+  "merchantId": "11111111-1111-1111-1111-111111111111",
+  "amountZar": 250.00,
+  "reference": "MANUAL-SETTLE-001",
+  "asset": "BTC"
+}
+
+### ---------------------------------------------------------------------------
+### Webhook delivery: the retry pattern
+###
+### The delivery log shows attempt counts climbing and the next scheduled
+### attempt. The seeded merchant points at http://localhost:9999, which is
+### deliberately unreachable inside the container, so deliveries fail and retry:
+###
+###   attempt 1 -> next in ~3s
+###   attempt 2 -> next in ~6s
+###   attempt 3 -> next in ~13s
+###   attempt 4 -> next in ~25s
+###   attempt 5 -> next in ~45s   (capped)
+###   attempt 6 -> Failed, dead-lettered, CRITICAL event raised
+###
+### The jitter matters more than it looks. Without it, a hundred deliveries that
+### failed together would retry together for ever, arriving as synchronised
+### bursts that are themselves a small denial of service.
+### ---------------------------------------------------------------------------
+GET {{gw}}/api/settlements/webhooks?merchantId={{merchantId}}
+X-API-Key: {{key}}
+
+### Only the dead letters.
+GET {{gw}}/api/settlements/webhooks?merchantId={{merchantId}}&status=Failed
+X-API-Key: {{key}}
+
+### Requeue one after the merchant has fixed their endpoint. 202.
+### Resets the schedule, not the history.
+POST {{gw}}/api/settlements/webhooks/00000000-0000-0000-0000-000000000000/retry
+X-API-Key: {{key}}
+
+### ---------------------------------------------------------------------------
+### Showing a delivery SUCCEED, and the signature being verified
+###
+### /demo/webhook-sink is a test receiver standing in for a merchant's server.
+### It is a harness, not part of the product, and it does what a real
+### integration should: recompute the HMAC over timestamp + "." + raw body,
+### compare in fixed time, and reject anything older than five minutes.
+###
+### Point the merchant's webhook at it, then pay an invoice.
+### ---------------------------------------------------------------------------
+
+### 1. Log in for a dashboard token.
+POST {{gw}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "owner@democoffee.co.za", "password": "demo-password-123" }
+
+### 2. Repoint the webhook. Note this raises MERCHANT_WEBHOOK_URL_CHANGED,
+###    because repointing where payment notifications go is a classic account
+###    takeover step.
+###    Inside the compose network the sink is http://gateway:8080/demo/webhook-sink.
+PUT {{gw}}/api/merchants/{{merchantId}}
+Content-Type: application/json
+Authorization: Bearer PASTE_TOKEN_HERE
+
+{ "webhookUrl": "http://gateway:8080/demo/webhook-sink" }
+
+### 3. Create and pay an invoice, then look at what arrived. Expect
+###    "verdict": "verified" on attempt 1.
+GET {{gw}}/demo/webhook-sink
+
+### Clear the sink between demo runs.
+DELETE {{gw}}/demo/webhook-sink
+
+### Put the webhook back to the broken URL to demonstrate retries again.
+PUT {{gw}}/api/merchants/{{merchantId}}
+Content-Type: application/json
+Authorization: Bearer PASTE_TOKEN_HERE
+
+{ "webhookUrl": "http://localhost:9999/webhooks/pandapocket" }
+
+### Health, and the OpenAPI document.
+GET {{settlement}}/health
+
+###
+GET {{settlement}}/swagger/v1/swagger.json

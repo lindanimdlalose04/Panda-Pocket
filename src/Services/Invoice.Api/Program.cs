@@ -44,8 +44,20 @@ builder.Services.AddHttpClient<IRateClient, RateClient>((sp, client) =>
     client.Timeout = TimeSpan.FromSeconds(options.RateTimeoutSeconds);
 });
 
+// Money must not be lost, so this call retries rather than failing fast, and
+// Settlement's endpoint is idempotent per invoice to make retrying safe. The
+// timeout is longer than the Rate one because correctness matters more here than
+// latency: nobody is waiting on this to render a checkout page.
+builder.Services.AddHttpClient<ISettlementClient, SettlementClient>((sp, client) =>
+{
+    var options = sp.GetRequiredService<IOptions<InvoiceOptions>>().Value;
+    client.BaseAddress = new Uri(options.SettlementServiceBaseUrl);
+    client.Timeout = TimeSpan.FromSeconds(options.SettlementTimeoutSeconds);
+});
+
 builder.Services.AddScoped<InvoiceService>();
 builder.Services.AddHostedService<ExpirySweeper>();
+builder.Services.AddHostedService<SettlementSweeper>();
 
 builder.Services.AddHealthChecks()
     .AddNpgSql(

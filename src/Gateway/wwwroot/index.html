@@ -106,6 +106,7 @@
     </div>
   </div>
 
+  <div>
   <div class="card">
     <h2>Invoices</h2>
     <table>
@@ -119,6 +120,32 @@
         <tr><td colspan="6" class="note">loading…</td></tr>
       </tbody>
     </table>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h2>ZAR ledger</h2>
+    <div class="rates" style="margin-bottom:12px">
+      <div class="rate"><div class="p">AVAILABLE</div><div class="v" id="balAvailable">-</div></div>
+      <div class="rate"><div class="p">LIFETIME GROSS</div><div class="v" id="balGross">-</div></div>
+      <div class="rate"><div class="p">PLATFORM FEES</div><div class="v" id="balFees">-</div></div>
+    </div>
+    <table>
+      <thead><tr><th>Type</th><th>Amount</th><th>Balance after</th><th>Description</th></tr></thead>
+      <tbody id="ledgerRows"><tr><td colspan="4" class="note">no entries yet</td></tr></tbody>
+    </table>
+    <div class="note" id="reconcile" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h2>Webhook deliveries</h2>
+    <table>
+      <thead><tr><th>Status</th><th>Attempts</th><th>Next attempt</th><th>Last error</th><th></th></tr></thead>
+      <tbody id="hookRows"><tr><td colspan="5" class="note">no deliveries yet</td></tr></tbody>
+    </table>
+    <div class="note" style="margin-top:10px">
+      Failed deliveries are dead-lettered, not discarded. Retry requeues one.
+    </div>
+  </div>
   </div>
 
 </div>
@@ -310,6 +337,72 @@ async function refresh() {
   }
 }
 
+const MERCHANT_ID = '11111111-1111-1111-1111-111111111111';
+
+async function loadSettlement() {
+  try {
+    const [balRes, ledRes, hookRes, recRes] = await Promise.all([
+      fetch(`${API}/api/settlements/${MERCHANT_ID}/balance`, { headers: authHeaders() }),
+      fetch(`${API}/api/settlements/${MERCHANT_ID}/ledger?pageSize=8`, { headers: authHeaders() }),
+      fetch(`${API}/api/settlements/webhooks?merchantId=${MERCHANT_ID}`, { headers: authHeaders() }),
+      fetch(`${API}/api/settlements/${MERCHANT_ID}/reconcile`, { headers: authHeaders() })
+    ]);
+
+    if (balRes.ok) {
+      const b = await balRes.json();
+      document.getElementById('balAvailable').textContent = money(b.availableZar);
+      document.getElementById('balGross').textContent = money(b.lifetimeCreditedZar);
+      document.getElementById('balFees').textContent = money(b.lifetimeFeesZar);
+    }
+
+    if (ledRes.ok) {
+      const l = await ledRes.json();
+      document.getElementById('ledgerRows').innerHTML = l.entries.length
+        ? l.entries.map(e => `<tr>
+            <td><span class="pill ${e.entryType === 'Credit' ? 'Paid' : 'Underpaid'}">${e.entryType}</span></td>
+            <td class="mono">${money(e.amountZar)}</td>
+            <td class="mono">${money(e.balanceAfterZar)}</td>
+            <td class="note">${e.description || ''}</td>
+          </tr>`).join('')
+        : '<tr><td colspan="4" class="note">no entries yet</td></tr>';
+    }
+
+    if (recRes.ok) {
+      const r = await recRes.json();
+      // The stored balance is a cache of the ledger. This proves it has not drifted.
+      document.getElementById('reconcile').innerHTML = r.matches
+        ? `<span class="ok">Reconciled: stored ${money(r.storedBalanceZar)} equals the sum of the ledger.</span>`
+        : `<span class="err">Ledger mismatch: stored ${money(r.storedBalanceZar)} vs ${money(r.recomputedFromLedgerZar)}.</span>`;
+    }
+
+    if (hookRes.ok) {
+      const hooks = await hookRes.json();
+      document.getElementById('hookRows').innerHTML = hooks.length
+        ? hooks.slice(0, 8).map(w => {
+            const cls = w.status === 'Delivered' ? 'Paid' : w.status === 'Failed' ? 'Expired' : 'Pending';
+            const retry = w.status === 'Failed'
+              ? `<button class="ghost" style="margin:0;padding:4px 8px" onclick="retryHook('${w.id}')">Retry</button>` : '';
+            return `<tr>
+              <td><span class="pill ${cls}">${w.status}</span></td>
+              <td class="mono">${w.attemptCount}/6</td>
+              <td class="mono note">${w.status === 'Pending' ? new Date(w.nextAttemptAt).toLocaleTimeString('en-ZA') : '-'}</td>
+              <td class="note">${(w.lastError || '').slice(0, 40)}</td>
+              <td>${retry}</td>
+            </tr>`;
+          }).join('')
+        : '<tr><td colspan="5" class="note">no deliveries yet</td></tr>';
+    }
+  } catch { /* the panels simply stay as they were */ }
+}
+
+async function retryHook(id) {
+  const res = await fetch(`${API}/api/settlements/webhooks/${id}/retry`, {
+    method: 'POST', headers: authHeaders()
+  });
+  log(res.ok ? 'Delivery requeued.' : `Retry failed with ${res.status}.`, res.ok ? 'ok' : 'err');
+  loadSettlement();
+}
+
 async function loadRates() {
   try {
     const res = await fetch(`${API}/api/rates`);
@@ -340,6 +433,7 @@ setInterval(() => {
 
 setInterval(loadRates, 5000);
 setInterval(refresh, 15000);
+setInterval(loadSettlement, 8000);
 
 // Prefill the key and remember any edit.
 document.getElementById('apikey').value = getKey();
@@ -347,6 +441,7 @@ document.getElementById('apikey').addEventListener('change', e => setKey(e.targe
 
 loadRates();
 refresh();
+loadSettlement();
 </script>
 
 </body>

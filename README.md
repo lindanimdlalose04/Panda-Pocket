@@ -23,6 +23,7 @@ compose file as they are built.
 | Gateway      | http://localhost:5000   | Ocelot, the only public entry point |
 | Merchant API | http://localhost:5001   | `/swagger` for the API docs         |
 | Invoice API  | http://localhost:5002   | `/swagger` for the API docs         |
+| Settlement   | http://localhost:5004   | `/swagger` for the API docs         |
 | Rate API     | http://localhost:5003   | `/swagger` for the API docs         |
 | Seq          | http://localhost:5341   | logs, auth disabled, see compose    |
 | Postgres     | `localhost:5432`        | see `infra/postgres/init.sql`       |
@@ -205,6 +206,56 @@ codes worth knowing about:
 | 410  | Payment against an expired invoice: fetch a fresh one, do not retry |
 | 422  | Underpayment: stored, invoice can still be topped up |
 | 503  | Rate unavailable and no cached fallback |
+
+## Settlement, the ledger and webhooks
+
+Paying an invoice credits the merchant and queues a signed notification.
+
+```bash
+curl "http://localhost:5000/api/settlements/11111111-1111-1111-1111-111111111111/ledger"   -H "X-API-Key: pk_live_demo0000000000000000000000000000000000"
+```
+
+One R250 invoice writes **two** entries, not one net entry:
+
+```
+Credit  +250.00   balance 250.00
+Fee       -2.50   balance 247.50
+```
+
+"You were paid R250 and we took R2.50" is a statement a merchant can check. A
+single R247.50 line hides where the difference went.
+
+`merchant_balances` is a cache of the ledger, and `/reconcile` proves it has not
+drifted by recomputing the sum and comparing.
+
+### Watching the retry pattern
+
+The seeded merchant's webhook points at `http://localhost:9999`, which is
+deliberately unreachable. Pay an invoice, then watch the attempts climb:
+
+```bash
+curl "http://localhost:5000/api/settlements/webhooks?merchantId=11111111-1111-1111-1111-111111111111"   -H "X-API-Key: pk_live_demo0000000000000000000000000000000000"
+```
+
+Backoff runs at roughly 3s, 6s, 12s, 25s, 45s, each with jitter and capped, then
+the delivery dead-letters as `Failed` with a CRITICAL security event. It stays in
+the table rather than disappearing, and can be requeued.
+
+The jitter matters: without it, deliveries that failed together would retry
+together for ever, arriving as synchronised bursts.
+
+### Watching a delivery succeed
+
+`/demo/webhook-sink` is a test receiver standing in for a merchant's server. It
+verifies the HMAC signature the way a real integration should, and returns 401 to
+anything it cannot verify. Point the merchant at it and pay an invoice:
+
+```bash
+curl "http://localhost:5000/demo/webhook-sink"
+```
+
+Expect `"verdict": "verified"` on attempt 1. Full walkthrough in
+`requests/settlement.http`.
 
 ## The Rate service
 

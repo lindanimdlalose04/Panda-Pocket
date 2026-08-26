@@ -15,6 +15,14 @@
 
   "Routes": [
     {
+      "//": "Merchant balance, ledger and webhook delivery log.",
+      "DownstreamPathTemplate": "/api/settlements/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5004 } ],
+      "UpstreamPathTemplate": "/api/settlements/{everything}",
+      "UpstreamHttpMethod": [ "GET", "POST" ]
+    },
+    {
       "//": "Dashboard login. Anonymous by necessity: there is no key yet.",
       "DownstreamPathTemplate": "/api/auth/{everything}",
       "DownstreamScheme": "http",

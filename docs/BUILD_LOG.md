@@ -618,3 +618,137 @@ pp-gateway    running (healthy)   5000->8080    Ocelot gateway + client
 Security events reaching Seq from both Gateway and Merchant: `AUTH_FAILED` and
 `API_KEY_INVALID`, each carrying correlation id, path, method and remote IP,
 which is the shape the SOC layer will ingest.
+
+---
+
+## Day 5, Wednesday 26 August 2026 - Settlement and webhooks
+
+### Built
+
+- Settlement service: `ledger_entries`, `merchant_balances` and
+  `webhook_deliveries`, with balance, ledger, reconciliation and delivery-log
+  endpoints.
+- Webhook dispatcher: durable queue, HMAC-signed payloads, exponential backoff
+  with jitter, and dead-lettering after six attempts.
+- Invoice calls Settlement on payment, then moves the invoice to Settled, with
+  a sweeper that picks up anything the inline retries missed.
+- `PandaPocket.Shared.Persistence`, so the snake_case convention lives in one
+  place rather than being copied into a third service.
+- A demo webhook receiver at `/demo/webhook-sink` on the gateway.
+- `requests/settlement.http`, and ledger plus delivery panels in the client.
+
+### Decisions
+
+**Two ledger entries per settlement, not one net entry.** A R250 invoice writes
+`Credit +250.00` and `Fee -2.50`. "You were paid R250 and we took R2.50" is a
+statement a merchant can check; a single R247.50 line hides where the difference
+went and makes platform fee income impossible to sum. Amounts are signed, so the
+balance is a plain `SUM` of the column rather than a conditional that has to
+know which entry types subtract, which means a sign error shows up as visibly
+wrong arithmetic instead of a silently wrong total.
+
+**`balance_after` is stored even though it is derivable.** Redundant on purpose:
+a statement renders without recomputing a running total across the merchant's
+whole history, and any divergence between the column and the recomputed sum is
+proof that something wrote the ledger incorrectly. Redundancy you can check is a
+feature. `/reconcile` is that check, and it raises a CRITICAL event on mismatch.
+
+**Ledger rows are insert-only.** Nothing updates or deletes them. That is what
+makes this a ledger rather than a balance table with history bolted on: the
+balance is a consequence of the entries and can always be recomputed. A ledger
+you can edit is one nobody can audit.
+
+**Settlement is idempotent per invoice, enforced by a unique index.** The index
+on `(invoice_id, entry_type)` is what makes Invoice's retry safe. This matters
+more than a comment can convey: an application-level "have I already settled
+this" check races with itself under concurrent requests, and a unique index does
+not. The service checks first for a clean 200, and catches the constraint
+violation for the case where two calls raced and both passed the check.
+
+**The webhook row is written in the same transaction as the ledger.** Queueing
+the notification only after a successful commit would leave a window where a
+crash means a merchant is credited and never told. Committing them together
+makes the intent to notify exactly as durable as the money.
+
+**The stored payload is signed, and is never regenerated per attempt.** The HMAC
+covers those exact bytes. Rebuilding the JSON on retry risks a different
+serialisation, a different signature, and a retry the merchant correctly rejects
+as forged.
+
+**The timestamp is inside the signed material.** Signing only the body would let
+anyone who ever captured one valid callback replay it verbatim for ever, since
+the signature would stay valid. With the timestamp signed and checked, a
+captured callback stops being useful after five minutes.
+
+**Three call types, three resilience strategies.** This is the distinction that
+belongs in the report, and each choice follows from what failure costs:
+
+| Call | Strategy | Why |
+|---|---|---|
+| Invoice to Rate | Circuit breaker, cached fallback (day 6) | Critical path. A slightly stale rate beats a checkout that hangs. |
+| Invoice to Settlement | Retry, plus a sweeper, against an idempotent endpoint | It is money. Losing it means a merchant was paid and never credited. |
+| Settlement to merchant | Durable queue, backoff with jitter, dead letter | External and untrusted. Cannot be fixed by us, must not be hammered. |
+
+**Jitter, not plain exponential backoff.** Without it, a hundred deliveries that
+failed together retry together for ever, arriving as synchronised bursts that
+are themselves a small denial of service against an endpoint already struggling.
+
+**Bounded retries with a dead letter, not infinite retries.** Retrying for ever
+ties up resources on an endpoint that may never return. After six attempts the
+row is marked Failed and kept, so somebody can see what was never delivered and
+requeue it once the merchant has fixed their side.
+
+### The ordering bug
+
+The credit and fee were written with `now` and `now.AddTicks(1)`, so that
+ordering by `created_at` would put the credit first. It did not. A .NET tick is
+100 nanoseconds and Postgres timestamps have microsecond resolution, so the
+added tick is rounded away on write: both rows landed on an identical timestamp
+and the database returned them in whatever order it liked. On a statement that
+reads as the fee being charged before the money arrived. Changed to
+`AddMilliseconds(1)`, which survives the round trip.
+
+Visible in the client: entries written after the fix are correctly ordered,
+while the older rows still show the arbitrary order they were stored with.
+
+### A note on the demo webhook sink
+
+`/demo/webhook-sink` is a test harness, not part of the product, and is
+namespaced and routed accordingly. It exists because "the retry backs off
+correctly" is only half the story: without a receiver, nothing ever demonstrates
+a delivery succeeding, and nothing demonstrates the signature being verified by
+the party it protects.
+
+It does what a real integration should do, so it doubles as documentation of the
+expected merchant side, and it returns 401 rather than 200 to a payload it
+cannot verify. One difference from a real merchant: it looks the signing secret
+up from the Merchant service, because it stands in for any merchant rather than
+one. A real integration already knows its own secret.
+
+### Done when
+
+- [x] A payment produces exactly two ledger rows, a credit and a fee
+- [x] The merchant balance updates and reconciles against the ledger sum
+- [x] A webhook delivery record exists with a climbing attempt count
+- [x] Backoff observed at 3s, 6s, 12s, 25s, 46s, capped and jittered
+- [x] Exhausted deliveries dead-letter as Failed with a CRITICAL event
+- [x] A failed delivery can be requeued manually and returns 202
+- [x] A successful delivery is verified by the receiver's HMAC check
+- [x] Settling the same invoice twice returns 200 and does not double-credit
+
+### Verified state at end of day 5
+
+```
+pp-postgres     running (healthy)   5432->5432    PostgreSQL 16.15
+pp-mongo        running (healthy)   27018->27017  MongoDB 7
+pp-seq          running             5341->80      Seq
+pp-rate         running (healthy)   5003->8080    Rate service
+pp-merchant     running (healthy)   5001->8080    Merchant service
+pp-invoice      running (healthy)   5002->8080    Invoice service
+pp-settlement   running (healthy)   5004->8080    Settlement service
+pp-gateway      running (healthy)   5000->8080    Ocelot gateway + client
+```
+
+All four services and the gateway are now built, containerised and healthy from
+a single `docker compose up`. Day 6 adds no new services, only the circuit
+breaker, rate limiting and the remaining observability work.

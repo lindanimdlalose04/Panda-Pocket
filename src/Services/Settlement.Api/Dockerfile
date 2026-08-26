@@ -1,4 +1,4 @@
-# Panda Pocket Merchant service.
+# Panda Pocket Settlement service.
 #
 # IMPORTANT: the build context is the repository root, not this directory,
 # because this project references src/Shared/Contracts. Compose is configured
@@ -6,7 +6,7 @@
 #
 #   build:
 #     context: .
-#     dockerfile: src/Services/Merchant.Api/Dockerfile
+#     dockerfile: src/Services/Settlement.Api/Dockerfile
 #
 # Building from the service directory fails during restore with a missing
 # project reference, which reads like a corrupt solution rather than a context
@@ -23,11 +23,11 @@ WORKDIR /src
 # front would invalidate the cache on every source change.
 COPY ["src/Shared/Contracts/PandaPocket.Shared.Contracts.csproj", "src/Shared/Contracts/"]
 COPY ["src/Shared/Persistence/PandaPocket.Shared.Persistence.csproj", "src/Shared/Persistence/"]
-COPY ["src/Services/Merchant.Api/PandaPocket.Services.Merchant.csproj", "src/Services/Merchant.Api/"]
-RUN dotnet restore "src/Services/Merchant.Api/PandaPocket.Services.Merchant.csproj"
+COPY ["src/Services/Settlement.Api/PandaPocket.Services.Settlement.csproj", "src/Services/Settlement.Api/"]
+RUN dotnet restore "src/Services/Settlement.Api/PandaPocket.Services.Settlement.csproj"
 
 COPY src/ src/
-RUN dotnet publish "src/Services/Merchant.Api/PandaPocket.Services.Merchant.csproj" \
+RUN dotnet publish "src/Services/Settlement.Api/PandaPocket.Services.Settlement.csproj" \
     -c Release -o /app/publish --no-restore
 
 # ---------------------------------------------------------------------------
@@ -50,4 +50,4 @@ COPY --from=build /app/publish .
 USER $APP_UID
 
 EXPOSE 8080
-ENTRYPOINT ["dotnet", "PandaPocket.Services.Merchant.dll"]
+ENTRYPOINT ["dotnet", "PandaPocket.Services.Settlement.dll"]

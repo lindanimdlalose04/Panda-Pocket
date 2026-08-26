@@ -1,0 +1,58 @@
+Panda Pocket - Settlement and webhook verification (day 5)
+Captured: 2026-08-26 07:35 UTC
+
+=== containers ===
+NAME            STATE     STATUS
+pp-gateway      running   Up 3 minutes (healthy)
+pp-invoice      running   Up 16 minutes (healthy)
+pp-merchant     running   Up 17 minutes (healthy)
+pp-mongo        running   Up 17 minutes (healthy)
+pp-postgres     running   Up 17 minutes (healthy)
+pp-rate         running   Up 16 minutes (healthy)
+pp-seq          running   Up 17 minutes
+pp-settlement   running   Up 8 minutes (healthy)
+
+=== ledger: two entries per settled invoice ===
+total entries: 12
+  Fee          -4.20  balance    1653.30  Platform fee at 1.00%
+  Credit      420.00  balance    1657.50  Invoice WEBHOOK-OK-1787729324 settled
+  Fee          -2.50  balance    1237.50  Platform fee at 1.00%
+  Credit      250.00  balance    1240.00  Invoice SETTLE-1787728831 settled
+  Fee          -2.50  balance     990.00  Platform fee at 1.00%
+  Credit      250.00  balance     992.50  Invoice EVIDENCE-1787684276 settled
+
+=== balance ===
+  available R1653.30 | lifetime gross R1670.00 | platform fees R16.70
+
+=== reconciliation: stored balance vs recomputed sum of ledger ===
+  stored R1653.30  recomputed R1653.30  matches=True
+
+=== webhook deliveries ===
+  by status: {'Delivered': 1, 'Failed': 5}
+  Delivered attempts=1/6  http://gateway:8080/demo/webhook-sink
+  Failed    attempts=6/6  http://localhost:9999/webhooks/pandapocket
+              last error: Connection refused (localhost:9999)
+  Failed    attempts=6/6  http://localhost:9999/webhooks/pandapocket
+              last error: Connection refused (localhost:9999)
+  Failed    attempts=6/6  http://localhost:9999/webhooks/pandapocket
+              last error: Connection refused (localhost:9999)
+  Failed    attempts=6/6  http://localhost:9999/webhooks/pandapocket
+              last error: Connection refused (localhost:9999)
+  Failed    attempts=6/6  http://localhost:9999/webhooks/pandapocket
+              last error: Connection refused (localhost:9999)
+
+=== exponential backoff, from the dispatcher log ===
+  [07:29:58 WRN] Webhook 0c80a120-b75e-4a20-a645-6627a1792247 attempt 1/6 failed (Connection refused (localhost:9999)); next attempt in 3s
+  [07:30:03 WRN] Webhook 0c80a120-b75e-4a20-a645-6627a1792247 attempt 2/6 failed (Connection refused (localhost:9999)); next attempt in 6s
+  [07:30:12 WRN] Webhook 0c80a120-b75e-4a20-a645-6627a1792247 attempt 3/6 failed (Connection refused (localhost:9999)); next attempt in 12s
+  [07:30:27 WRN] Webhook 0c80a120-b75e-4a20-a645-6627a1792247 attempt 4/6 failed (Connection refused (localhost:9999)); next attempt in 25s
+  [07:30:59 WRN] Webhook 0c80a120-b75e-4a20-a645-6627a1792247 attempt 5/6 failed (Connection refused (localhost:9999)); next attempt in 46s
+
+=== a delivery that succeeded, and the merchant verifying its signature ===
+  [07:28:53 INF] Webhook 8d918962-be2c-4f27-a8ac-246bc43bc45c delivered on attempt 1 with 200
+  sink verdict : verified (attempt 1)
+  payload      : R320.00 gross, R3.20 fee, R316.80 net, ref HOOK-EVIDENCE-1787729805
+
+  The receiver recomputes HMAC-SHA256 over timestamp + "." + raw body,
+  compares in fixed time, and rejects anything older than five minutes.
+  An unverified payload gets 401 from the merchant, not 200.

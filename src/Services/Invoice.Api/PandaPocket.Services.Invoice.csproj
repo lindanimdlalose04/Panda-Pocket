@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Shared\Contracts\PandaPocket.Shared.Contracts.csproj" />
+    <ProjectReference Include="..\..\Shared\Persistence\PandaPocket.Shared.Persistence.csproj" />
   </ItemGroup>
 
   <ItemGroup>

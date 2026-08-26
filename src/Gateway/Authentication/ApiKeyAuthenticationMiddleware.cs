@@ -62,7 +62,13 @@ public sealed class ApiKeyAuthenticationMiddleware(
         "/favicon.ico",
         "/api/auth",
         "/api/merchants",
-        "/api/api-keys"
+        "/api/api-keys",
+
+        // The demo webhook sink stands in for a merchant's own server. Real
+        // merchant endpoints are not behind our gateway's authentication either;
+        // they authenticate us by verifying the HMAC signature, which is exactly
+        // what this one does.
+        "/demo"
     ];
 
     /// <summary>

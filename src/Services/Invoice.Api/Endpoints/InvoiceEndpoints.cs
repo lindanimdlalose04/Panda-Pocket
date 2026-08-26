@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.EntityFrameworkCore;
+using PandaPocket.Services.Invoice.Clients;
 using PandaPocket.Services.Invoice.Contracts;
 using PandaPocket.Services.Invoice.Domain;
 using PandaPocket.Services.Invoice.Persistence;
@@ -172,6 +173,7 @@ public static class InvoiceEndpoints
             Guid id,
             RecordPaymentRequest request,
             InvoiceService service,
+            ISettlementClient settlement,
             HttpContext ctx,
             CancellationToken ct) =>
         {
@@ -184,6 +186,28 @@ public static class InvoiceEndpoints
             {
                 return Problem("Forbidden", "This invoice belongs to another merchant.",
                     StatusCodes.Status403Forbidden);
+            }
+
+            // A fully paid invoice triggers settlement, which credits the
+            // merchant and queues the webhook, and then moves to Settled.
+            //
+            // Done inline so the common case completes in one request and the
+            // demo shows the whole chain at once. If Settlement is unreachable
+            // the invoice simply stays Paid, which is the honest state: the
+            // customer's money arrived and the merchant is not yet credited. The
+            // SettlementSweeper picks those up, so a failure here defers the
+            // work rather than losing it.
+            if (result.Outcome == InvoiceOutcome.Success && result.Invoice is { } paid)
+            {
+                var settled = await settlement.SettleAsync(
+                    paid.Id, paid.MerchantId, paid.AmountZar, paid.Reference, paid.Asset,
+                    ctx.GetCorrelationId(), ct);
+
+                if (settled is not null)
+                {
+                    var settleResult = await service.MarkSettledAsync(paid.Id, ctx.GetCorrelationId(), ct);
+                    if (settleResult.Invoice is { } final) return Results.Ok(InvoiceResponse.From(final));
+                }
             }
 
             return result.Outcome switch
