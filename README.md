@@ -43,9 +43,39 @@ bits from a cryptographic RNG. It exists so the client works from a clean clone
 with nothing to configure. Every key, including this one, is stored only as a
 SHA-256 hash.
 
-Open **http://localhost:5000** and the client is there: create an invoice, watch
-the countdown, pay it, underpay it, replay a transaction. Every call it makes
-goes through the gateway, never directly to a service.
+Open **http://localhost:5000** and the merchant view is there: create an invoice,
+watch the countdown, read the ZAR ledger, inspect the webhook delivery log. Every
+call it makes goes through the gateway, never directly to a service.
+
+### Seeding a demo
+
+```bash
+bash infra/seed-demo.sh
+```
+
+Creates three merchants and eight invoices covering every state the machine can
+reach, including two left pending with checkout links printed. It works through
+the public API rather than the database, so it doubles as an end-to-end test.
+
+To start completely fresh, `./infra/reset-demo.ps1` removes the volumes, rebuilds
+and reseeds. It prompts first, because it is destructive.
+
+### The two screens
+
+| | |
+|---|---|
+| **Merchant view** | http://localhost:5000 |
+| **Customer checkout** | http://localhost:5000/checkout.html?id=... |
+
+The checkout page is what a merchant sends their customer: the rand amount, the
+crypto equivalent, the address to pay, and a live countdown on the locked rate.
+
+It is **public and needs no API key**, which is deliberate. The person paying is
+not the merchant and holds no credential; requiring one would mean putting the
+merchant's key in a page the customer can read. The invoice id is the bearer
+token, which is why it is a random GUID rather than a sequential number, and the
+response is scoped to what a payer may see: no merchant id, nothing about the
+merchant's account.
 
 MongoDB is published on **27018**, not the usual 27017, because a local MongoDB
 service on the development machine already holds that port and a host process

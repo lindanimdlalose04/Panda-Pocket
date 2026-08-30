@@ -1,0 +1,55 @@
+Panda Pocket - client, seed data and freeze (day 7)
+Captured: 2026-08-30 18:28 UTC
+
+=== rebuilt from nothing ===
+  docker compose down -v   removed all three volumes
+  docker compose up -d     brought eight containers healthy in about a minute,
+                           applying three EF migrations and seeding the demo
+                           merchant with no manual step
+
+NAME            STATE     STATUS
+pp-gateway      running   Up 2 minutes (healthy)
+pp-invoice      running   Up 2 minutes (healthy)
+pp-merchant     running   Up 2 minutes (healthy)
+pp-mongo        running   Up 3 minutes (healthy)
+pp-postgres     running   Up 3 minutes (healthy)
+pp-rate         running   Up 2 minutes (healthy)
+pp-seq          running   Up 3 minutes
+pp-settlement   running   Up 2 minutes (healthy)
+
+=== every gateway route ===
+  GET  /                            -> 200  (merchant view)
+  GET  /checkout.html               -> 200  (customer checkout)
+  GET  /health                      -> 200
+  GET  /api/rates                   -> 200  (public)
+  POST /api/auth/login              -> 200  (public)
+  GET  /api/invoices  (no key)      -> 401  (rejected at the gateway)
+  GET  /api/invoices  (valid key)   -> 200
+  GET  /api/settlements/../balance  -> 200
+  GET  /demo/webhook-sink           -> 200  (test receiver)
+
+=== seeded demo data ===
+  8 invoices, covering every reachable state:
+    ORDER-20268    R1500.00   Pending    ETH
+    ORDER-20267    R250.00    Pending    BTC
+    ORDER-20266    R175.00    Cancelled  BTC
+    ORDER-20265    R600.00    Underpaid  BTC
+    ORDER-20264    R89.00     Settled    USDT
+    ORDER-20263    R1250.00   Settled    ETH
+    ORDER-20262    R480.00    Settled    BTC
+    ORDER-20261    R250.00    Settled    BTC
+
+  ledger: R2048.31 available, R2069.00 gross, R20.69 platform fees
+  reconciled: True (stored R2048.31 = sum of ledger R2048.31)
+
+=== three screens ===
+  1. Merchant view      /                      create, list, ledger, webhook log
+  2. Customer checkout  /checkout.html?id=...  amount, address, live countdown
+  3. Logs               localhost:5341         Seq, filterable by correlation id
+
+=== regression fixed on freeze day ===
+  Day 6 rate limiting silently broke every route without an explicit
+  RateLimitOptions block: /api/rates, /api/auth/login and /api/checkout
+  all returned 503. With a global ClientIdHeader set, Ocelot applies a
+  default empty rule to any route that does not opt out, then cannot
+  identify the client. Every route now states its position explicitly.

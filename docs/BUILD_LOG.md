@@ -940,3 +940,153 @@ pp-gateway      running (healthy)   5000->8080    Ocelot gateway + client
 ```
 
 Code freezes tomorrow night. Day 7 is client polish, seed data and nothing else.
+
+---
+
+## Day 7, Friday 28 August 2026 - client, seed data, freeze
+
+### Built
+
+- A customer-facing checkout page, `/checkout.html?id=...`, with the crypto
+  amount, pay-to address, locked rate and a live countdown.
+- Public, unauthenticated checkout endpoints in the Invoice service.
+- `infra/seed-demo.sh`, which populates the system through the public API.
+- `infra/reset-demo.ps1`, a full teardown and rebuild.
+- Checkout links from the merchant view.
+
+### The three screens
+
+The brief asked for three, and they are now distinct rather than one page
+pretending to be several:
+
+1. **Merchant view**, `/`. Create an invoice, watch the list, read the ZAR
+   ledger with its reconciliation proof, and inspect the webhook delivery log.
+2. **Customer checkout**, `/checkout.html?id=...`. What a shopper sees. Amount,
+   crypto equivalent, address to send to, and the countdown.
+3. **Logs**, Seq at 5341, filterable by correlation id.
+
+### The decision behind the checkout page
+
+**A customer paying is not the merchant and holds no API key.** Requiring one
+would mean putting the merchant credential into a page the customer can read,
+which defeats the point of having credentials. So the checkout endpoints are
+public and the invoice id is the bearer token.
+
+That is why invoice ids are version 4 GUIDs and not sequential numbers. 122 bits
+of randomness make the link unguessable, so holding it is the authorisation.
+BitPay and Coinbase Commerce work the same way.
+
+It follows that the response must be scoped. `CheckoutResponse` carries the
+amount, the crypto figure, the address, the status and the countdown, and
+deliberately no merchant id and nothing about the merchant account. A payment
+link handed to a stranger should reveal the payment and nothing else. Verified.
+
+**The countdown is computed server side.** The customer's clock cannot be
+trusted and the timer has to agree with the server that will actually reject a
+late payment.
+
+**`simulate-payment` is named to be unmistakable.** In a real deployment nothing
+customer facing may record a payment; confirmations come from a service watching
+the blockchain, authenticated in its own right. The endpoint exists so the demo
+can be driven from the checkout page, and both the route name and the page text
+say so.
+
+### Seeding through the API, not the database
+
+`seed-demo.sh` creates merchants and invoices by calling the same public
+endpoints a merchant would use. Direct SQL inserts would be faster and would
+silently drift from reality the moment an endpoint changed; going through the
+API means the seed script doubles as an end-to-end test of the whole stack, and
+it exercised the settlement and webhook paths for free.
+
+References are order numbers, `ORDER-20261` and so on, rather than slugified
+labels. A first attempt produced references like
+`SEED-202313-Flat-white-and-a-cro`, which reads as machine generated. Merchants
+use order numbers, so the demo should too.
+
+### The regression found on freeze day
+
+Day 6's rate limiting had silently broken every route that did not carry an
+explicit `RateLimitOptions` block. `/api/rates`, `/api/auth/login` and the new
+`/api/checkout` all returned **503**:
+
+```
+Rate limiting client could not be identified for the route
+'/api/checkout/{everything}' due to a missing or unknown client ID header
+required by rule '0/1s/w0ms'
+```
+
+With a global `ClientIdHeader` configured, Ocelot applies a default empty rule
+to any route that does not opt out, then cannot identify the client and refuses.
+The two invoice routes worked because they had explicit options; nothing else
+did.
+
+It survived a full day because after adding rate limiting I re-tested the
+invoice routes and the SOC events, which were what I had changed, and did not
+re-check the routes I had not touched. The client would have shown it
+immediately, since it polls `/api/rates` every five seconds. **The lesson is
+that a change to global gateway configuration is not a local change, and the
+whole surface needs re-testing after one.**
+
+Every route now states its position explicitly, including the eight that are not
+limited, and the reason is written into `ocelot.json` so nobody removes the
+"redundant" blocks later. All twelve routes verified after the fix, with rate
+limiting still working on the invoice path and rates still unlimited under the
+same burst.
+
+### The reset, and why it is worth having
+
+After a week of testing the invoice list held 39 expired invoices with
+references like `NOKEY-002` and `CB-FALLBACK-1-1787771299`. That looks worse in
+a demo than an empty database: it looks like a system that has been failing.
+
+`reset-demo.ps1` removes the volumes, brings the stack back up and reseeds. It
+is destructive and prompts before doing anything. It also turned out to be the
+strongest piece of deployment evidence in the project, because it demonstrates
+the whole system rebuilding from nothing:
+
+```
+docker compose down -v      all three volumes removed
+docker compose up -d        eight containers healthy in about a minute,
+                            three EF migrations applied, demo merchant seeded,
+                            with no manual step at any point
+```
+
+### Final demo state
+
+```
+8 invoices, covering every reachable state:
+  ORDER-20268   R1500.00  Pending     ETH
+  ORDER-20267   R250.00   Pending     BTC
+  ORDER-20266   R175.00   Cancelled   BTC
+  ORDER-20265   R600.00   Underpaid   BTC
+  ORDER-20264   R89.00    Settled     USDT
+  ORDER-20263   R1250.00  Settled     ETH
+  ORDER-20262   R480.00   Settled     BTC
+  ORDER-20261   R250.00   Settled     BTC
+
+ledger: R2048.31 available, R2069.00 gross, R20.69 platform fees
+reconciled: stored balance equals the sum of the ledger
+```
+
+Three merchants exist, which is what makes the 403 checks demonstrable rather
+than theoretical.
+
+### Code freeze
+
+Code is frozen as of the end of today, per the plan. Days 8 and 9 are the report
+and the recording. Anything found from here is cut rather than fixed, unless it
+stops the demo running.
+
+### Verified state at freeze
+
+```
+pp-postgres     running (healthy)   5432->5432    PostgreSQL 16.15
+pp-mongo        running (healthy)   27018->27017  MongoDB 7
+pp-seq          running             5341->80      Seq
+pp-rate         running (healthy)   5003->8080    Rate service
+pp-merchant     running (healthy)   5001->8080    Merchant service
+pp-invoice      running (healthy)   5002->8080    Invoice service
+pp-settlement   running (healthy)   5004->8080    Settlement service
+pp-gateway      running (healthy)   5000->8080    Ocelot gateway + both clients
+```

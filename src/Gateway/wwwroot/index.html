@@ -213,7 +213,8 @@ async function createInvoice() {
       // The correlation id the gateway minted is echoed back, so it can be
       // shown here and pasted straight into Seq to trace this exact request.
       const cid = res.headers.get('X-Correlation-Id') || 'n/a';
-      log(`Created ${data.reference}: ${data.cryptoAmount} ${data.asset} at ${money(data.lockedRate)}. Correlation ${cid}`, 'ok');
+      log(`Created ${data.reference}: ${data.cryptoAmount} ${data.asset} at ${money(data.lockedRate)}. ` +
+          `<a href="/checkout.html?id=${data.id}" target="_blank">Open checkout</a>. Correlation ${cid}`, 'ok');
       document.getElementById('reference').value = '';
     } else if (res.status === 409) {
       log(`${data.title}: ${data.detail}`, 'err');
@@ -316,9 +317,11 @@ async function refresh() {
 
     rows.innerHTML = data.items.map(i => {
       const live = i.status === 'Pending' || i.status === 'Underpaid';
+      // The checkout link is what a merchant would send their customer. It
+      // carries no key: the invoice GUID is the authorisation.
       const actions = live
-        ? `<button class="ghost" style="margin:0;padding:4px 8px" onclick="pay('${i.id}', ${i.cryptoAmount}, false)">Pay</button>
-           <button class="ghost" style="margin:0;padding:4px 8px" onclick="pay('${i.id}', ${i.cryptoAmount}, true)">Underpay</button>
+        ? `<a class="ghost" style="display:inline-block;margin:0;padding:4px 8px;border-radius:7px;border:1px solid var(--line);text-decoration:none;color:var(--ink)" href="/checkout.html?id=${i.id}" target="_blank">Checkout</a>
+           <button class="ghost" style="margin:0;padding:4px 8px" onclick="pay('${i.id}', ${i.cryptoAmount}, false)">Pay</button>
            <button class="ghost" style="margin:0;padding:4px 8px" onclick="cancel('${i.id}')">Cancel</button>`
         : `<button class="ghost" style="margin:0;padding:4px 8px" onclick="replay('${i.id}')">Replay</button>`;
 

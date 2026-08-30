@@ -143,6 +143,10 @@ app.UseSwaggerUI(c =>
 
 app.MapInvoiceEndpoints();
 
+// Public, unauthenticated: the customer paying holds no API key. The invoice
+// GUID is the bearer token, which is why it is random rather than sequential.
+app.MapCheckoutEndpoints();
+
 app.MapHealthChecks("/health", new()
 {
     ResponseWriter = HealthResponseWriter.WriteAsync

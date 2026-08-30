@@ -16,10 +16,22 @@
 
   "Routes": [
     {
+      "//": "Customer-facing checkout. Public: the invoice GUID is the bearer token.",
+      "DownstreamPathTemplate": "/api/checkout/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "invoice-service", "Port": 8080 } ],
+      "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
+      "RateLimitOptions": { "EnableRateLimiting": false },
+      "UpstreamPathTemplate": "/api/checkout/{everything}",
+      "UpstreamHttpMethod": [ "GET", "POST" ]
+    },
+    {
       "//": "Merchant balance, ledger and webhook delivery log.",
       "DownstreamPathTemplate": "/api/settlements/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "settlement-service", "Port": 8080 } ],
+      "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
+      "RateLimitOptions": { "EnableRateLimiting": false },
       "UpstreamPathTemplate": "/api/settlements/{everything}",
       "UpstreamHttpMethod": [ "GET", "POST" ]
     },
@@ -28,6 +40,8 @@
       "DownstreamPathTemplate": "/api/auth/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "merchant-service", "Port": 8080 } ],
+      "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
+      "RateLimitOptions": { "EnableRateLimiting": false },
       "UpstreamPathTemplate": "/api/auth/{everything}",
       "UpstreamHttpMethod": [ "POST" ]
     },
@@ -36,6 +50,8 @@
       "DownstreamPathTemplate": "/api/merchants",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "merchant-service", "Port": 8080 } ],
+      "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
+      "RateLimitOptions": { "EnableRateLimiting": false },
       "UpstreamPathTemplate": "/api/merchants",
       "UpstreamHttpMethod": [ "POST" ]
     },
@@ -44,6 +60,8 @@
       "DownstreamPathTemplate": "/api/merchants/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "merchant-service", "Port": 8080 } ],
+      "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
+      "RateLimitOptions": { "EnableRateLimiting": false },
       "UpstreamPathTemplate": "/api/merchants/{everything}",
       "UpstreamHttpMethod": [ "GET", "PUT", "POST" ]
     },
@@ -52,6 +70,8 @@
       "DownstreamPathTemplate": "/api/api-keys/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "merchant-service", "Port": 8080 } ],
+      "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
+      "RateLimitOptions": { "EnableRateLimiting": false },
       "UpstreamPathTemplate": "/api/api-keys/{everything}",
       "UpstreamHttpMethod": [ "DELETE" ]
     },
@@ -90,6 +110,8 @@
       "DownstreamPathTemplate": "/api/rates",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "rate-service", "Port": 8080 } ],
+      "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
+      "RateLimitOptions": { "EnableRateLimiting": false },
       "UpstreamPathTemplate": "/api/rates",
       "UpstreamHttpMethod": [ "GET" ]
     },
@@ -97,6 +119,8 @@
       "DownstreamPathTemplate": "/api/rates/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "rate-service", "Port": 8080 } ],
+      "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
+      "RateLimitOptions": { "EnableRateLimiting": false },
       "UpstreamPathTemplate": "/api/rates/{everything}",
       "UpstreamHttpMethod": [ "GET" ]
     }
@@ -115,6 +139,14 @@
       "",
       "Limits apply to the invoice write path only. Rates are public market data",
       "that a checkout page polls legitimately every few seconds.",
+      "",
+      "Every route carries an explicit RateLimitOptions block, including the",
+      "ones that are not limited. That is not verbosity for its own sake: with a",
+      "global ClientIdHeader set, Ocelot applies a default empty rule to any",
+      "route that does not opt out, then cannot identify the client and answers",
+      "503. Setting EnableRateLimiting false explicitly is what keeps the public",
+      "routes public. This was found on day 7 after it had silently broken",
+      "/api/rates, /api/auth/login and /api/checkout for a whole day.",
       "",
       "Note the gap this leaves: unauthenticated requests are rejected by the",
       "API key middleware before Ocelot ever sees them, so they carry no",

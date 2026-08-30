@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pay with crypto | Panda Pocket</title>
+  <style>
+    :root {
+      --bg: #0f1115; --panel: #171a21; --line: #262b36;
+      --ink: #e8eaed; --muted: #9aa4b2; --accent: #4ade80;
+      --warn: #fbbf24; --bad: #f87171; --info: #60a5fa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 32px 20px; background: var(--bg); color: var(--ink);
+      font: 15px/1.5 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+      display: flex; justify-content: center;
+    }
+    .checkout { width: 100%; max-width: 460px; }
+    .brand { text-align: center; margin-bottom: 20px; }
+    .brand h1 { margin: 0; font-size: 18px; font-weight: 650; }
+    .brand .sub { color: var(--muted); font-size: 12px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 12px; padding: 22px;
+    }
+    .amount { text-align: center; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+    .amount .zar { font-size: 32px; font-weight: 680; letter-spacing: -.02em; }
+    .amount .ref { color: var(--muted); font-size: 13px; margin-top: 2px; }
+    .crypto {
+      margin: 18px 0; padding: 14px; border-radius: 9px;
+      background: #0d0f14; border: 1px solid var(--line); text-align: center;
+    }
+    .crypto .big {
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 21px; font-weight: 650; color: var(--accent); word-break: break-all;
+    }
+    .crypto .rate { color: var(--muted); font-size: 11px; margin-top: 4px; }
+    .field { margin-top: 14px; }
+    .field label { display: block; font-size: 11px; text-transform: uppercase;
+      letter-spacing: .06em; color: var(--muted); margin-bottom: 5px; }
+    .addr {
+      display: flex; gap: 8px; align-items: stretch;
+    }
+    .addr code {
+      flex: 1; background: #0d0f14; border: 1px solid var(--line); border-radius: 7px;
+      padding: 10px; font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+      word-break: break-all; color: var(--ink);
+    }
+    button {
+      border: none; border-radius: 7px; cursor: pointer; font: inherit;
+      font-weight: 650; padding: 10px 14px;
+    }
+    .copy { background: transparent; color: var(--ink); border: 1px solid var(--line); white-space: nowrap; }
+    .pay { width: 100%; margin-top: 18px; background: var(--accent); color: #06240f; padding: 12px; }
+    .pay:hover { filter: brightness(1.08); }
+    .pay:disabled { opacity: .45; cursor: not-allowed; }
+    .under { width: 100%; margin-top: 8px; background: transparent;
+      color: var(--muted); border: 1px solid var(--line); }
+    .timer {
+      margin-top: 18px; text-align: center; padding: 12px;
+      border-radius: 9px; background: #0d0f14; border: 1px solid var(--line);
+    }
+    .timer .t { font-family: ui-monospace, Consolas, monospace; font-size: 26px; font-weight: 650; }
+    .timer .l { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+    .timer.urgent .t { color: var(--warn); }
+    .timer.dead .t { color: var(--bad); }
+    .state { margin-top: 16px; padding: 14px; border-radius: 9px; text-align: center; font-size: 14px; }
+    .state.ok { background: #14361f; color: var(--accent); }
+    .state.bad { background: #3d1d1d; color: var(--bad); }
+    .state.warn { background: #4a3410; color: var(--warn); }
+    .note { color: var(--muted); font-size: 11px; text-align: center; margin-top: 16px; line-height: 1.5; }
+    .hidden { display: none; }
+    a { color: var(--info); }
+  </style>
+</head>
+<body>
+
+<div class="checkout">
+  <div class="brand">
+    <h1>Panda Pocket</h1>
+    <div class="sub">Secure crypto payment</div>
+  </div>
+
+  <div class="card" id="card">
+    <div class="amount">
+      <div class="zar" id="zar">-</div>
+      <div class="ref" id="ref"></div>
+    </div>
+
+    <div id="payable">
+      <div class="crypto">
+        <div class="big" id="cryptoAmount">-</div>
+        <div class="rate" id="rate"></div>
+      </div>
+
+      <div class="field">
+        <label for="addr">Send to this address</label>
+        <div class="addr">
+          <code id="addr">-</code>
+          <button class="copy" onclick="copyAddress()">Copy</button>
+        </div>
+      </div>
+
+      <div class="timer" id="timer">
+        <div class="t" id="countdown">--:--</div>
+        <div class="l">Rate locked for</div>
+      </div>
+
+      <button class="pay" id="payBtn" onclick="pay(false)">Simulate wallet payment</button>
+      <button class="under" onclick="pay(true)">Simulate underpayment (half)</button>
+    </div>
+
+    <div id="stateBox"></div>
+  </div>
+
+  <div class="note">
+    The rate is fixed for the countdown. The merchant receives the rand amount
+    above whatever the crypto price does in the meantime.
+    <br><br>
+    The two buttons stand in for a wallet sending funds and the network
+    confirming them. In a real deployment nothing customer facing may record a
+    payment; confirmations arrive from a service watching the blockchain.
+  </div>
+</div>
+
+<script>
+// The invoice id in the URL is the whole authorisation. It is a random v4 GUID,
+// so holding the link is what proves you were sent to this payment. Nothing here
+// carries an API key, because the customer is not the merchant.
+const id = new URLSearchParams(location.search).get('id');
+
+const money = n => 'R' + Number(n).toLocaleString('en-ZA',
+  { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+let secondsLeft = 0;
+let finished = false;
+
+function setState(html, cls) {
+  document.getElementById('stateBox').innerHTML = `<div class="state ${cls}">${html}</div>`;
+}
+
+async function load() {
+  if (!id) {
+    document.getElementById('payable').classList.add('hidden');
+    setState('No invoice specified. This link is missing its id.', 'bad');
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/checkout/${id}`);
+
+    if (!res.ok) {
+      document.getElementById('payable').classList.add('hidden');
+      setState('This payment link is not valid.', 'bad');
+      finished = true;
+      return;
+    }
+
+    render(await res.json());
+  } catch (e) {
+    setState('Cannot reach the payment gateway.', 'bad');
+  }
+}
+
+function render(inv) {
+  document.getElementById('zar').textContent = money(inv.amountZar);
+  document.getElementById('ref').textContent = 'Order ' + inv.reference;
+  document.getElementById('cryptoAmount').textContent = `${inv.cryptoAmount} ${inv.asset}`;
+  document.getElementById('rate').textContent =
+    `at ${money(inv.lockedRate)} per ${inv.asset}, locked`;
+  document.getElementById('addr').textContent = inv.payToAddress;
+
+  secondsLeft = inv.secondsRemaining;
+
+  const live = inv.status === 'Pending' || inv.status === 'Underpaid';
+  document.getElementById('payable').classList.toggle('hidden', !live);
+
+  if (inv.status === 'Paid' || inv.status === 'Settled') {
+    finished = true;
+    setState(`Payment received. Thank you.<br><small>${inv.totalReceived} ${inv.asset} confirmed.</small>`, 'ok');
+  } else if (inv.status === 'Expired') {
+    finished = true;
+    setState('This invoice expired. Ask the merchant for a new payment link.', 'bad');
+  } else if (inv.status === 'Cancelled') {
+    finished = true;
+    setState('This invoice was cancelled by the merchant.', 'bad');
+  } else if (inv.status === 'Underpaid') {
+    setState(`Partly paid. ${inv.outstanding} ${inv.asset} still outstanding.`, 'warn');
+  } else {
+    document.getElementById('stateBox').innerHTML = '';
+  }
+}
+
+async function pay(half) {
+  const btn = document.getElementById('payBtn');
+  btn.disabled = true;
+
+  try {
+    const body = half ? { amountCrypto: null } : {};
+
+    if (half) {
+      const res0 = await fetch(`/api/checkout/${id}`);
+      const inv = await res0.json();
+      body.amountCrypto = +(inv.outstanding / 2).toFixed(8);
+    }
+
+    const res = await fetch(`/api/checkout/${id}/simulate-payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (res.ok) {
+      render(data);
+    } else if (res.status === 422) {
+      // Underpaid: the payment was accepted and stored, it just does not
+      // satisfy the invoice yet.
+      render(data.invoice);
+    } else if (res.status === 410) {
+      finished = true;
+      document.getElementById('payable').classList.add('hidden');
+      setState('This invoice expired before the payment arrived.', 'bad');
+    } else {
+      setState(data.detail || 'Payment could not be recorded.', 'bad');
+    }
+  } catch {
+    setState('Cannot reach the payment gateway.', 'bad');
+  }
+
+  btn.disabled = false;
+}
+
+function copyAddress() {
+  const text = document.getElementById('addr').textContent;
+  navigator.clipboard?.writeText(text).catch(() => { /* clipboard may be blocked */ });
+}
+
+// Tick locally between polls so the countdown moves every second without
+// hitting the server every second. The server value is authoritative and
+// overwrites this on each refresh.
+setInterval(() => {
+  if (finished) return;
+
+  const box = document.getElementById('timer');
+  const el = document.getElementById('countdown');
+
+  if (secondsLeft <= 0) {
+    el.textContent = '00:00';
+    box.className = 'timer dead';
+    return;
+  }
+
+  secondsLeft -= 1;
+  const m = Math.floor(secondsLeft / 60), s = secondsLeft % 60;
+  el.textContent = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  box.className = secondsLeft < 120 ? 'timer urgent' : 'timer';
+}, 1000);
+
+// Poll for status changes, so a payment confirmed elsewhere (the merchant view,
+// or a real chain watcher) updates this page too.
+setInterval(() => { if (!finished) load(); }, 5000);
+
+load();
+</script>
+
+</body>
+</html>

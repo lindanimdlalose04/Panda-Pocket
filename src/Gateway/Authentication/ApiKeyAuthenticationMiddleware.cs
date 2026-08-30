@@ -68,7 +68,14 @@ public sealed class ApiKeyAuthenticationMiddleware(
         // merchant endpoints are not behind our gateway's authentication either;
         // they authenticate us by verifying the HMAC signature, which is exactly
         // what this one does.
-        "/demo"
+        "/demo",
+
+        // The customer-facing checkout. Whoever is paying holds no API key and
+        // should not: requiring one would mean putting the merchant credential
+        // in a page the customer can read. The unguessable invoice GUID is the
+        // authorisation, and the response is scoped to what a payer may see.
+        "/api/checkout",
+        "/checkout.html"
     ];
 
     /// <summary>

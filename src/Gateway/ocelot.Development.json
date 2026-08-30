@@ -15,10 +15,22 @@
 
   "Routes": [
     {
+      "//": "Customer-facing checkout. Public: the invoice GUID is the bearer token.",
+      "DownstreamPathTemplate": "/api/checkout/{everything}",
+      "DownstreamScheme": "http",
+      "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5002 } ],
+      "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
+      "RateLimitOptions": { "EnableRateLimiting": false },
+      "UpstreamPathTemplate": "/api/checkout/{everything}",
+      "UpstreamHttpMethod": [ "GET", "POST" ]
+    },
+    {
       "//": "Merchant balance, ledger and webhook delivery log.",
       "DownstreamPathTemplate": "/api/settlements/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5004 } ],
+      "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
+      "RateLimitOptions": { "EnableRateLimiting": false },
       "UpstreamPathTemplate": "/api/settlements/{everything}",
       "UpstreamHttpMethod": [ "GET", "POST" ]
     },
@@ -27,6 +39,8 @@
       "DownstreamPathTemplate": "/api/auth/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5001 } ],
+      "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
+      "RateLimitOptions": { "EnableRateLimiting": false },
       "UpstreamPathTemplate": "/api/auth/{everything}",
       "UpstreamHttpMethod": [ "POST" ]
     },
@@ -35,6 +49,8 @@
       "DownstreamPathTemplate": "/api/merchants",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5001 } ],
+      "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
+      "RateLimitOptions": { "EnableRateLimiting": false },
       "UpstreamPathTemplate": "/api/merchants",
       "UpstreamHttpMethod": [ "POST" ]
     },
@@ -43,6 +59,8 @@
       "DownstreamPathTemplate": "/api/merchants/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5001 } ],
+      "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
+      "RateLimitOptions": { "EnableRateLimiting": false },
       "UpstreamPathTemplate": "/api/merchants/{everything}",
       "UpstreamHttpMethod": [ "GET", "PUT", "POST" ]
     },
@@ -51,6 +69,8 @@
       "DownstreamPathTemplate": "/api/api-keys/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5001 } ],
+      "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
+      "RateLimitOptions": { "EnableRateLimiting": false },
       "UpstreamPathTemplate": "/api/api-keys/{everything}",
       "UpstreamHttpMethod": [ "DELETE" ]
     },
@@ -86,6 +106,8 @@
       "DownstreamPathTemplate": "/api/rates",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5003 } ],
+      "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
+      "RateLimitOptions": { "EnableRateLimiting": false },
       "UpstreamPathTemplate": "/api/rates",
       "UpstreamHttpMethod": [ "GET" ]
     },
@@ -93,6 +115,8 @@
       "DownstreamPathTemplate": "/api/rates/{everything}",
       "DownstreamScheme": "http",
       "DownstreamHostAndPorts": [ { "Host": "localhost", "Port": 5003 } ],
+      "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
+      "RateLimitOptions": { "EnableRateLimiting": false },
       "UpstreamPathTemplate": "/api/rates/{everything}",
       "UpstreamHttpMethod": [ "GET" ]
     }
