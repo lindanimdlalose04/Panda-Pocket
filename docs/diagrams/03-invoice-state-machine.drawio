@@ -1,0 +1,103 @@
+<mxfile host="app.diagrams.net" type="device">
+  <diagram name="Invoice state machine" id="state-1">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Invoice state machine" style="text;html=1;align=left;verticalAlign=middle;fontSize=16;fontStyle=1;fontColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="500" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="Every transition not drawn here is a rejected request, and every rejection is both an HTTP error and a logged security event.&#10;The rules live in one place, PandaPocket.Shared.Contracts.Invoicing.InvoiceStatusRules, so the diagram and the code cannot drift apart." style="text;html=1;align=left;verticalAlign=middle;fontSize=10;fontStyle=2;fontColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="40" y="48" width="900" height="34" as="geometry" />
+        </mxCell>
+
+        <mxCell id="start" value="" style="ellipse;html=1;fillColor=#000000;strokeColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="140" y="120" width="30" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="pending" value="Pending" style="rounded=1;arcSize=30;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="200" y="200" width="150" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="underpaid" value="Underpaid" style="rounded=1;arcSize=30;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="200" y="380" width="150" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="paid" value="Paid" style="rounded=1;arcSize=30;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="490" y="290" width="150" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="settled" value="Settled" style="rounded=1;arcSize=30;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=13;fontStyle=1;shadow=0;" vertex="1" parent="1">
+          <mxGeometry x="790" y="290" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="settledInner" value="" style="rounded=1;arcSize=30;html=1;fillColor=none;strokeColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="795" y="295" width="140" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="expired" value="Expired" style="rounded=1;arcSize=30;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="490" y="490" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="expiredInner" value="" style="rounded=1;arcSize=30;html=1;fillColor=none;strokeColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="495" y="495" width="140" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cancelled" value="Cancelled" style="rounded=1;arcSize=30;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="490" y="100" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="cancelledInner" value="" style="rounded=1;arcSize=30;html=1;fillColor=none;strokeColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="495" y="105" width="140" height="50" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t0" value="invoice created,&#10;rate locked for 15 min" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;fontColor=#000000;fontSize=9;endArrow=block;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;labelBackgroundColor=#ffffff;verticalAlign=bottom;" edge="1" parent="1" source="start" target="pending">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="155" y="230" /></Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="t1" value="payment within tolerance&#10;200" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;fontColor=#000000;fontSize=9;endArrow=block;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="pending" target="paid">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t2" value="payment short of amount&#10;422" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;fontColor=#000000;fontSize=9;endArrow=block;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="pending" target="underpaid">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t3" value="top-up received&#10;200" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;fontColor=#000000;fontSize=9;endArrow=block;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="underpaid" target="paid">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t4" value="ledger written by Settlement" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;fontColor=#000000;fontSize=9;endArrow=block;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="paid" target="settled">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="t5" value="merchant cancels&#10;200" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;fontColor=#000000;fontSize=9;endArrow=block;exitX=0.75;exitY=0;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="pending" target="cancelled">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="313" y="130" /></Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="t6" value="window elapsed&#10;(expiry sweeper)" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;fontColor=#000000;fontSize=9;endArrow=block;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="underpaid" target="expired">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="238" y="520" /></Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="t7" value="window elapsed&#10;(expiry sweeper)" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;fontColor=#000000;fontSize=9;endArrow=block;labelBackgroundColor=#ffffff;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="pending" target="expired">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="70" y="250" /><mxPoint x="70" y="660" /><mxPoint x="565" y="660" /></Array>
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="legend" value="Notation&#10;&#10;Filled circle: initial pseudostate.&#10;Double border: terminal state, no transition leaves it.&#10;Numbers on transitions: the HTTP status the caller receives." style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;align=left;verticalAlign=top;spacingLeft=10;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="790" y="450" width="330" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="rejected" value="Rejected transitions, and what the caller gets back&#10;&#10;409  payment against a Paid, Settled or Cancelled invoice&#10;409  a transaction hash already recorded (replay)&#10;410  payment against an Expired invoice: ask for a new one&#10;409  cancelling anything already terminal" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;dashed=1;fontColor=#000000;fontSize=10;align=left;verticalAlign=top;spacingLeft=10;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="790" y="580" width="330" height="120" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

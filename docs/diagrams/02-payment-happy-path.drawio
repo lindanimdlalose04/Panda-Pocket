@@ -1,0 +1,86 @@
+<mxfile host="app.diagrams.net" type="device">
+  <diagram name="Payment happy path" id="flow-1">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Payment happy path" style="text;html=1;align=left;verticalAlign=middle;fontSize=16;fontStyle=1;fontColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="500" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="Five stages. This diagram doubles as the demo script: each numbered stage is one thing to show on screen." style="text;html=1;align=left;verticalAlign=middle;fontSize=10;fontStyle=2;fontColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="40" y="48" width="900" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="lane1" value="Merchant system" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;fontStyle=1;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="160" height="620" as="geometry" />
+        </mxCell>
+        <mxCell id="lane2" value="API Gateway" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;fontStyle=1;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="200" y="90" width="160" height="620" as="geometry" />
+        </mxCell>
+        <mxCell id="lane3" value="Invoice" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;fontStyle=1;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="360" y="90" width="180" height="620" as="geometry" />
+        </mxCell>
+        <mxCell id="lane4" value="Rate" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;fontStyle=1;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="540" y="90" width="150" height="620" as="geometry" />
+        </mxCell>
+        <mxCell id="lane5" value="Settlement" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;fontStyle=1;verticalAlign=top;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="690" y="90" width="180" height="620" as="geometry" />
+        </mxCell>
+        <mxCell id="lane6" value="Merchant&#39;s server" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;fontStyle=1;verticalAlign=top;spacingTop=4;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="870" y="90" width="170" height="620" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s1" value="&lt;b&gt;1&lt;/b&gt;  POST /api/invoices&#10;{ amountZar: 250,&#10;  reference, asset }&#10;X-API-Key" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="55" y="130" width="130" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s2" value="&lt;b&gt;2&lt;/b&gt;  validate key&#10;strip X-Merchant-Id,&#10;then set it from the key&#10;mint X-Correlation-Id&#10;check rate limit" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="212" y="130" width="136" height="86" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s3" value="&lt;b&gt;3&lt;/b&gt;  ask for a quote" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="372" y="240" width="156" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s3b" value="GBM simulator&#10;returns BTCZAR" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="552" y="240" width="126" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s3c" value="&lt;b&gt;lock&lt;/b&gt; the rate on the invoice&#10;compute crypto amount&#10;persist Pending, expires in 15 min&#10;&#10;&lt;b&gt;201 Created&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="372" y="310" width="156" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s4" value="&lt;b&gt;4&lt;/b&gt;  customer pays&#10;POST .../payments&#10;{ txHash, amountCrypto }&#10;&#10;validate: still Pending,&#10;not expired, amount within&#10;tolerance, txHash unseen&#10;&#10;&#8594; &lt;b&gt;Paid&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="372" y="420" width="156" height="140" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s5" value="&lt;b&gt;5&lt;/b&gt;  write the ledger&#10;&#10;Credit  +250.00&#10;Fee       -2.50&#10;update the balance&#10;&#10;queue the webhook in the&#10;same transaction" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="702" y="420" width="156" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s5b" value="HMAC-signed POST&#10;retry with backoff,&#10;dead letter after 6" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;dashed=1;fontColor=#000000;fontSize=10;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="885" y="450" width="140" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s6" value="&#8594; &lt;b&gt;Settled&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="372" y="600" width="156" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="f1" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;" edge="1" parent="1" source="s1" target="s2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;" edge="1" parent="1" source="s2" target="s3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f3" value="circuit breaker" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;fontSize=9;fontColor=#000000;verticalAlign=bottom;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="s3" target="s3b"><mxGeometry relative="1" as="geometry"><mxPoint as="offset" y="-8" /></mxGeometry></mxCell>
+        <mxCell id="f4" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=1;entryY=0.25;entryDx=0;entryDy=0;" edge="1" parent="1" source="s3b" target="s3c"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f5" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;" edge="1" parent="1" source="s3c" target="s4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f6" value="retry, idempotent" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;fontSize=9;fontColor=#000000;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="s4" target="s5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f7" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;dashed=1;" edge="1" parent="1" source="s5" target="s5b"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="f8" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="s5" target="s6"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="note" value="One X-Correlation-Id is minted at stage 2 and travels the whole way. Filtering Seq by that single id reconstructs the payment across Gateway, Invoice, Rate and Settlement in order.&#10;&#10;The rate locked at stage 3 is never recalculated. That single decision is the product: the merchant is quoted R250 and receives R250 whatever the crypto price does inside the window, because the platform carries the risk rather than the shop." style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;dashed=1;fontColor=#000000;fontSize=10;align=left;verticalAlign=top;spacingLeft=10;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="40" y="725" width="1000" height="80" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
