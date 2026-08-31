@@ -6,6 +6,7 @@ using PandaPocket.Services.Invoice.Configuration;
 using PandaPocket.Services.Invoice.Domain;
 using PandaPocket.Services.Invoice.Endpoints;
 using PandaPocket.Services.Invoice.Persistence;
+using PandaPocket.Shared.Contracts.Discovery;
 using PandaPocket.Shared.Contracts.Observability;
 using Polly;
 using Serilog;
@@ -101,6 +102,11 @@ builder.Services.AddHttpClient<ISettlementClient, SettlementClient>((sp, client)
     client.BaseAddress = new Uri(options.SettlementServiceBaseUrl);
     client.Timeout = TimeSpan.FromSeconds(options.SettlementTimeoutSeconds);
 });
+
+// Announce this instance to Consul on startup and remove it on shutdown,
+// with a health check Consul polls. Disabled unless configuration turns it
+// on, so the service still runs outside Compose.
+builder.Services.AddServiceRegistry(builder.Configuration);
 
 builder.Services.AddScoped<InvoiceService>();
 builder.Services.AddHostedService<ExpirySweeper>();

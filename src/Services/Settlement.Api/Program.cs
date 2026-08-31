@@ -6,6 +6,7 @@ using PandaPocket.Services.Settlement.Configuration;
 using PandaPocket.Services.Settlement.Domain;
 using PandaPocket.Services.Settlement.Endpoints;
 using PandaPocket.Services.Settlement.Persistence;
+using PandaPocket.Shared.Contracts.Discovery;
 using PandaPocket.Shared.Contracts.Observability;
 using Serilog;
 
@@ -44,6 +45,11 @@ builder.Services.AddHttpClient("webhook", (sp, client) =>
     var options = sp.GetRequiredService<IOptions<WebhookOptions>>().Value;
     client.Timeout = TimeSpan.FromSeconds(options.RequestTimeoutSeconds);
 });
+
+// Announce this instance to Consul on startup and remove it on shutdown,
+// with a health check Consul polls. Disabled unless configuration turns it
+// on, so the service still runs outside Compose.
+builder.Services.AddServiceRegistry(builder.Configuration);
 
 builder.Services.AddScoped<SettlementService>();
 builder.Services.AddHostedService<WebhookDispatcher>();

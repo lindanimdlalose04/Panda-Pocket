@@ -6,6 +6,7 @@ using PandaPocket.Services.Rate.Configuration;
 using PandaPocket.Services.Rate.Domain;
 using PandaPocket.Services.Rate.Endpoints;
 using PandaPocket.Services.Rate.Persistence;
+using PandaPocket.Shared.Contracts.Discovery;
 using PandaPocket.Shared.Contracts.Observability;
 using Serilog;
 
@@ -55,6 +56,11 @@ builder.Services.AddSingleton<IMongoClient>(sp =>
 
     return new MongoClient(settings);
 });
+
+// Announce this instance to Consul on startup and remove it on shutdown,
+// with a health check Consul polls. Disabled unless configuration turns it
+// on, so the service still runs outside Compose.
+builder.Services.AddServiceRegistry(builder.Configuration);
 
 builder.Services.AddScoped<ITickRepository, TickRepository>();
 builder.Services.AddSingleton<RateBook>();

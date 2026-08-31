@@ -1,8 +1,11 @@
 using PandaPocket.Gateway.Authentication;
 using PandaPocket.Gateway.Demo;
+using PandaPocket.Gateway.Discovery;
 using PandaPocket.Gateway.Observability;
 using Ocelot.DependencyInjection;
+
 using Ocelot.Middleware;
+using Ocelot.Provider.Consul;
 using PandaPocket.Shared.Contracts.Observability;
 using Serilog;
 
@@ -34,7 +37,29 @@ builder.Configuration
     .AddJsonFile("ocelot.json", optional: false, reloadOnChange: true)
     .AddJsonFile($"ocelot.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true);
 
-builder.Services.AddOcelot(builder.Configuration);
+// Ocelot resolves downstream hosts through Consul rather than from static
+// configuration. Routes name a service; Consul answers with the healthy
+// instances registered under that name.
+//
+// AddConsul() is only registered when the registry is switched on, so the
+// gateway still starts outside Compose, where ocelot.Development.json supplies
+// explicit hosts instead.
+var useRegistry = builder.Configuration.GetValue<bool>("ServiceRegistry:Enabled");
+
+var ocelotBuilder = builder.Services.AddOcelot(builder.Configuration);
+
+if (useRegistry)
+{
+    // Ocelot's own Consul provider, with one override. See
+    // PandaPocketConsulServiceBuilder for why the default resolves to the wrong
+    // host in a single-agent deployment like this one.
+    ocelotBuilder.AddConsul<PandaPocketConsulServiceBuilder>();
+    Log.Information("Service discovery: Consul");
+}
+else
+{
+    Log.Information("Service discovery: static configuration (development)");
+}
 
 // Used by the API key middleware to reach the Merchant service. The base
 // address is a compose service name, resolved by Docker DNS like every other

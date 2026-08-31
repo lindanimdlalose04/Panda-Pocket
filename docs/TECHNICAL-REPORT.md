@@ -48,9 +48,9 @@ databases, on a single Docker Compose network:
 | Rate | ZAR conversion quotes and tick history |
 | Settlement | The merchant ZAR ledger, platform fee income, webhook delivery |
 
-Eight containers, twenty six documented endpoints, three PostgreSQL databases
-and one MongoDB database, eight microservices patterns, and eleven security
-event types feeding a centralised log.
+Nine containers, twenty six documented endpoints, three PostgreSQL databases and
+one MongoDB database, a Consul service registry, eight microservices patterns,
+and eleven security event types feeding a centralised log.
 
 ### 1.4 Constraints that shaped the work
 
@@ -410,49 +410,114 @@ because it will recur.
 
 ---
 
-## 6. Service discovery
+## 6. Service registry and discovery
 
 ### 6.1 Mechanism
 
-Docker Compose DNS. Ocelot routes to `http://invoice-service:8080` and Docker's
-embedded DNS resolves that service name to whichever container currently holds
-it on the `pandapocket` network.
+HashiCorp Consul, running as a container on the Compose network, with each
+service registering itself.
 
-Verified from inside the gateway container:
+On startup every service PUTs its own entry to Consul's agent API: a service
+name, a unique instance id, the address and port other services should use, and
+an HTTP health check pointing back at its own `/health`. On shutdown it
+deregisters. Consul polls each health check every ten seconds and removes any
+instance that stays critical for a minute.
+
+Registration is self-service rather than a deployment step, because the instance
+is the only thing that knows it has finished starting. It also means scaling a
+service to three containers puts three instances in the catalogue with no
+configuration change anywhere else.
+
+### 6.2 What the catalogue holds
 
 ```
-172.18.0.6      invoice-service
-172.18.0.3      rate-service
+SERVICE              INSTANCE ID                    HEALTH
+invoice-service      invoice-service-d8d9af58       passing
+merchant-service     merchant-service-0c0e6620      passing
+rate-service         rate-service-f62e5b52          passing
+settlement-service   settlement-service-cb6256b8    passing
+
+rate-service         -> rate-service:8080
+merchant-service     -> merchant-service:8080
+invoice-service      -> invoice-service:8080
+settlement-service   -> settlement-service:8080
 ```
 
-### 6.2 Why this counts
+The UI is at `http://localhost:8500`.
 
-No configuration anywhere in this system contains a container IP address. Every
-service-to-service call names a service:
+### 6.3 The gateway resolves through the registry
 
-- Gateway to all four services, in `ocelot.json`
-- Invoice to Rate, `http://rate-service:8080`
-- Invoice to Settlement, `http://settlement-service:8080`
-- Settlement to Merchant, `http://merchant-service:8080`
-- Every service to Seq, `http://seq:5341`
+Ocelot routes name a **service**, never a host or an IP:
 
-Containers can be stopped, rebuilt and given a different IP with no
-reconfiguration. That was exercised repeatedly during the circuit breaker work,
-where the Rate container was stopped and restarted while the rest of the system
-kept running.
+```
+/api/rates                    -> service rate-service
+/api/invoices                 -> service invoice-service
+/api/auth/{everything}        -> service merchant-service
+/api/settlements/{everything} -> service settlement-service
+```
 
-### 6.3 Honest limits
+Ten routes, none with a hardcoded downstream host. Ocelot asks Consul which
+instances are registered under a name and healthy, then load balances across
+them with round robin. With one instance that is a no-op; with three it is load
+balancing for nothing extra.
 
-Compose DNS is a real discovery mechanism and it is explicitly permitted by the
-specification, but it is not a service registry. It provides name resolution and
-nothing else: no health-based registration, no load balancing across instances,
-no ability for a service to deregister itself while draining.
+### 6.4 Why a registry rather than DNS
 
-Consul with health-based registration was scoped as a stretch goal and not
-reached. The system would need it before running more than one instance of any
-service, because Compose DNS round-robins without regard to health.
+An earlier version used Docker Compose DNS. It resolved names correctly and was
+permitted, but it is name resolution and nothing more. The difference is visible
+in one test:
 
----
+```
+docker compose stop settlement-service
+  -> the instance deregisters itself and leaves the catalogue
+  -> settlement routes stop resolving; every other route is unaffected
+
+docker compose start settlement-service
+  -> it re-registers with a NEW instance id, health check passing
+  -> settlement routes resolve again, with no gateway restart and no config change
+```
+
+Compose DNS would have resolved `settlement-service` to a container whether or
+not that container could serve a request. Consul returns only instances whose
+health check is passing, so an instance whose database has gone away is taken
+out of rotation by the registry rather than by a caller discovering it the hard
+way.
+
+### 6.5 One thing that had to be overridden, and why
+
+Ocelot's bundled Consul provider builds the downstream address from the Consul
+**node** name, falling back to the service address. That is correct in the
+deployment Consul is normally run in, where every host runs its own agent and
+the node name is the routable hostname of the machine an instance sits on.
+
+This system has a single shared agent for the whole Compose network, so the node
+name is the Consul container's own hostname. Every lookup resolved there and
+every route answered 502:
+
+```
+Connection refused (266bb74f110f:8080)
+```
+
+`PandaPocketConsulServiceBuilder` overrides one virtual method to prefer
+`Service.Address`, which is what each instance actually registers as its
+reachable address.
+
+The alternative was to register through Consul's catalogue API with a fabricated
+per-service node, which would have produced correct addresses but given up
+Consul's actively polled health checks. Those checks are the more valuable half
+of running a registry at all, so the override was the better trade.
+
+### 6.6 Honest limits
+
+One Consul server in bootstrap mode, so the registry is itself a single point of
+failure. A production deployment runs three or five servers in a Raft cluster,
+and an agent on every host rather than one shared agent, which is also what would
+make the override above unnecessary.
+
+Services continue to run if Consul is unreachable at startup: registration
+retries with backoff and then gives up rather than preventing the service from
+serving requests. The gateway is the component that genuinely depends on Consul,
+since it cannot resolve a route without it.
 
 ## 7. Microservices patterns
 
@@ -695,8 +760,10 @@ everything claimed here is backed by captured output in `docs/evidence/`.
 **One Postgres container** hosting three databases. Logical isolation, not
 failure isolation, chosen for local resource cost.
 
-**Compose DNS rather than a service registry.** Name resolution without
-health-based registration or load balancing.
+**A single Consul server rather than a Raft cluster**, and one shared agent
+rather than an agent per host. The registry is therefore a single point of
+failure, and the shared agent is what forced the address-resolution override in
+section 6.5.
 
 **A local price simulator rather than a real exchange feed.** Deliberate: an
 external dependency that rate-limits or goes down during a live demo is an
@@ -739,8 +806,8 @@ visible only to a test that asked a different question.
 In order of value:
 
 1. An IP-based rate limiter in front of authentication, closing the gap in 4.6.
-2. Consul with health-based registration, needed before running more than one
-   instance of any service.
+2. A Consul cluster with an agent per host, removing the single point of failure
+   and the need for the address override.
 3. The SOC layer itself, consuming the event catalogue already being emitted.
 4. The Neo4j knowledge graph, loading `invoice_status_history` as edges.
 5. Separate Postgres containers, converting logical isolation into failure
@@ -758,7 +825,7 @@ paid in a currency that holds its value.
 ```
 PandaPocket.sln
 ├─ src/
-│  ├─ Gateway/                  Ocelot, auth middleware, both client pages
+│  ├─ Gateway/                  Ocelot, auth middleware, Consul discovery, client pages
 │  ├─ Services/
 │  │  ├─ Merchant.Api/          accounts, hashed keys, JWT
 │  │  ├─ Invoice.Api/           lifecycle, state machine, checkout
@@ -794,3 +861,4 @@ PandaPocket.sln
 | `day5-settlement.txt` | Two ledger rows, reconciliation, webhook backoff and dead letter |
 | `day6-patterns.txt` | Circuit breaker states, all eleven SOC events, rate limiting |
 | `day7-freeze.txt` | Rebuild from nothing, every route, final seeded state |
+| `service-registry-consul.txt` | Consul catalogue, self-registration, deregistration on shutdown |

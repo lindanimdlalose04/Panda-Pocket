@@ -10,6 +10,7 @@ using PandaPocket.Services.Merchant.Domain;
 using PandaPocket.Services.Merchant.Endpoints;
 using PandaPocket.Services.Merchant.Persistence;
 using PandaPocket.Services.Merchant.Security;
+using PandaPocket.Shared.Contracts.Discovery;
 using PandaPocket.Shared.Contracts.Observability;
 using Serilog;
 
@@ -31,6 +32,11 @@ builder.Services.Configure<DemoSeedOptions>(builder.Configuration.GetSection(Dem
 
 builder.Services.AddDbContext<MerchantDbContext>(o =>
     o.UseNpgsql(builder.Configuration.GetConnectionString("MerchantDb")));
+
+// Announce this instance to Consul on startup and remove it on shutdown,
+// with a health check Consul polls. Disabled unless configuration turns it
+// on, so the service still runs outside Compose.
+builder.Services.AddServiceRegistry(builder.Configuration);
 
 builder.Services.AddScoped<MerchantService>();
 builder.Services.AddSingleton<JwtIssuer>();

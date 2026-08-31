@@ -107,6 +107,12 @@ services:
       dockerfile: src/Services/Rate.Api/Dockerfile
     container_name: pp-rate
     environment:
+      ServiceRegistry__Enabled: "true"
+      ServiceRegistry__ConsulUrl: http://consul:8500
+      ServiceRegistry__ServiceName: rate-service
+      # The address other services use to reach this instance.
+      ServiceRegistry__ServiceAddress: rate-service
+      ServiceRegistry__ServicePort: 8080
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_HTTP_PORTS: 8080
       # Inside the network this is the container port 27017, not the published
@@ -116,6 +122,8 @@ services:
     ports:
       - "5003:8080"
     depends_on:
+      consul:
+        condition: service_healthy
       mongo:
         condition: service_healthy
       seq:
@@ -126,6 +134,34 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    networks: [pandapocket]
+
+  # ---------------------------------------------------------------------------
+  # Consul: the service registry.
+  #
+  # Each service registers itself here on startup with a health check pointing
+  # back at its own /health endpoint, and deregisters on shutdown. Consul polls
+  # those checks, so the catalogue reflects which instances can actually serve a
+  # request rather than merely which containers exist.
+  #
+  # The UI at http://localhost:8500 lists every registered service, its address,
+  # its port and its health.
+  # ---------------------------------------------------------------------------
+  consul:
+    image: hashicorp/consul:1.20
+    container_name: pp-consul
+    command: >
+      agent -server -bootstrap-expect=1 -ui
+      -client=0.0.0.0 -bind=0.0.0.0
+      -data-dir=/consul/data
+    ports:
+      - "8500:8500"
+    healthcheck:
+      test: ["CMD", "consul", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks: [pandapocket]
 
   # ---------------------------------------------------------------------------
@@ -141,6 +177,12 @@ services:
       dockerfile: src/Services/Merchant.Api/Dockerfile
     container_name: pp-merchant
     environment:
+      ServiceRegistry__Enabled: "true"
+      ServiceRegistry__ConsulUrl: http://consul:8500
+      ServiceRegistry__ServiceName: merchant-service
+      # The address other services use to reach this instance.
+      ServiceRegistry__ServiceAddress: merchant-service
+      ServiceRegistry__ServicePort: 8080
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_HTTP_PORTS: 8080
       ConnectionStrings__MerchantDb: "Host=postgres;Port=5432;Database=merchant_db;Username=merchant_svc;Password=merchant_pw_dev"
@@ -153,6 +195,8 @@ services:
     ports:
       - "5001:8080"
     depends_on:
+      consul:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       seq:
@@ -179,6 +223,12 @@ services:
       dockerfile: src/Services/Settlement.Api/Dockerfile
     container_name: pp-settlement
     environment:
+      ServiceRegistry__Enabled: "true"
+      ServiceRegistry__ConsulUrl: http://consul:8500
+      ServiceRegistry__ServiceName: settlement-service
+      # The address other services use to reach this instance.
+      ServiceRegistry__ServiceAddress: settlement-service
+      ServiceRegistry__ServicePort: 8080
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_HTTP_PORTS: 8080
       ConnectionStrings__SettlementDb: "Host=postgres;Port=5432;Database=settlement_db;Username=settlement_svc;Password=settlement_pw_dev"
@@ -187,6 +237,8 @@ services:
     ports:
       - "5004:8080"
     depends_on:
+      consul:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       merchant-service:
@@ -213,6 +265,12 @@ services:
       dockerfile: src/Services/Invoice.Api/Dockerfile
     container_name: pp-invoice
     environment:
+      ServiceRegistry__Enabled: "true"
+      ServiceRegistry__ConsulUrl: http://consul:8500
+      ServiceRegistry__ServiceName: invoice-service
+      # The address other services use to reach this instance.
+      ServiceRegistry__ServiceAddress: invoice-service
+      ServiceRegistry__ServicePort: 8080
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_HTTP_PORTS: 8080
       ConnectionStrings__InvoiceDb: "Host=postgres;Port=5432;Database=invoice_db;Username=invoice_svc;Password=invoice_pw_dev"
@@ -223,6 +281,8 @@ services:
     ports:
       - "5002:8080"
     depends_on:
+      consul:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       rate-service:
@@ -252,6 +312,7 @@ services:
       dockerfile: src/Gateway/Dockerfile
     container_name: pp-gateway
     environment:
+      ServiceRegistry__Enabled: "true"
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_HTTP_PORTS: 8080
       Seq__ServerUrl: http://seq:5341
@@ -261,6 +322,8 @@ services:
     ports:
       - "5000:8080"
     depends_on:
+      consul:
+        condition: service_healthy
       invoice-service:
         condition: service_healthy
       rate-service:

@@ -13,73 +13,117 @@
     "",
     "Rate limiting and the API key authentication handler are added on days 4 and 6."
   ],
-
   "Routes": [
     {
       "//": "Customer-facing checkout. Public: the invoice GUID is the bearer token.",
       "DownstreamPathTemplate": "/api/checkout/{everything}",
       "DownstreamScheme": "http",
-      "DownstreamHostAndPorts": [ { "Host": "invoice-service", "Port": 8080 } ],
       "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
-      "RateLimitOptions": { "EnableRateLimiting": false },
+      "RateLimitOptions": {
+        "EnableRateLimiting": false
+      },
       "UpstreamPathTemplate": "/api/checkout/{everything}",
-      "UpstreamHttpMethod": [ "GET", "POST" ]
+      "UpstreamHttpMethod": [
+        "GET",
+        "POST"
+      ],
+      "ServiceName": "invoice-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
     },
     {
       "//": "Merchant balance, ledger and webhook delivery log.",
       "DownstreamPathTemplate": "/api/settlements/{everything}",
       "DownstreamScheme": "http",
-      "DownstreamHostAndPorts": [ { "Host": "settlement-service", "Port": 8080 } ],
       "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
-      "RateLimitOptions": { "EnableRateLimiting": false },
+      "RateLimitOptions": {
+        "EnableRateLimiting": false
+      },
       "UpstreamPathTemplate": "/api/settlements/{everything}",
-      "UpstreamHttpMethod": [ "GET", "POST" ]
+      "UpstreamHttpMethod": [
+        "GET",
+        "POST"
+      ],
+      "ServiceName": "settlement-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
     },
     {
       "//": "Dashboard login. Anonymous by necessity: there is no key yet.",
       "DownstreamPathTemplate": "/api/auth/{everything}",
       "DownstreamScheme": "http",
-      "DownstreamHostAndPorts": [ { "Host": "merchant-service", "Port": 8080 } ],
       "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
-      "RateLimitOptions": { "EnableRateLimiting": false },
+      "RateLimitOptions": {
+        "EnableRateLimiting": false
+      },
       "UpstreamPathTemplate": "/api/auth/{everything}",
-      "UpstreamHttpMethod": [ "POST" ]
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
+      "ServiceName": "merchant-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
     },
     {
       "//": "Merchant sign-up. Also necessarily anonymous.",
       "DownstreamPathTemplate": "/api/merchants",
       "DownstreamScheme": "http",
-      "DownstreamHostAndPorts": [ { "Host": "merchant-service", "Port": 8080 } ],
       "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
-      "RateLimitOptions": { "EnableRateLimiting": false },
+      "RateLimitOptions": {
+        "EnableRateLimiting": false
+      },
       "UpstreamPathTemplate": "/api/merchants",
-      "UpstreamHttpMethod": [ "POST" ]
+      "UpstreamHttpMethod": [
+        "POST"
+      ],
+      "ServiceName": "merchant-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
     },
     {
       "//": "Merchant record and API key management. JWT protected by the service.",
       "DownstreamPathTemplate": "/api/merchants/{everything}",
       "DownstreamScheme": "http",
-      "DownstreamHostAndPorts": [ { "Host": "merchant-service", "Port": 8080 } ],
       "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
-      "RateLimitOptions": { "EnableRateLimiting": false },
+      "RateLimitOptions": {
+        "EnableRateLimiting": false
+      },
       "UpstreamPathTemplate": "/api/merchants/{everything}",
-      "UpstreamHttpMethod": [ "GET", "PUT", "POST" ]
+      "UpstreamHttpMethod": [
+        "GET",
+        "PUT",
+        "POST"
+      ],
+      "ServiceName": "merchant-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
     },
     {
       "//": "Key revocation.",
       "DownstreamPathTemplate": "/api/api-keys/{everything}",
       "DownstreamScheme": "http",
-      "DownstreamHostAndPorts": [ { "Host": "merchant-service", "Port": 8080 } ],
       "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
-      "RateLimitOptions": { "EnableRateLimiting": false },
+      "RateLimitOptions": {
+        "EnableRateLimiting": false
+      },
       "UpstreamPathTemplate": "/api/api-keys/{everything}",
-      "UpstreamHttpMethod": [ "DELETE" ]
+      "UpstreamHttpMethod": [
+        "DELETE"
+      ],
+      "ServiceName": "merchant-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
     },
     {
       "//": "Invoice collection: create and list.",
       "DownstreamPathTemplate": "/api/invoices",
       "DownstreamScheme": "http",
-      "DownstreamHostAndPorts": [ { "Host": "invoice-service", "Port": 8080 } ],
       "RateLimitOptions": {
         "EnableRateLimiting": true,
         "Period": "1m",
@@ -88,13 +132,19 @@
         "ClientWhitelist": []
       },
       "UpstreamPathTemplate": "/api/invoices",
-      "UpstreamHttpMethod": [ "GET", "POST" ]
+      "UpstreamHttpMethod": [
+        "GET",
+        "POST"
+      ],
+      "ServiceName": "invoice-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
     },
     {
       "//": "Everything under an invoice: read, payments, cancel, history.",
       "DownstreamPathTemplate": "/api/invoices/{everything}",
       "DownstreamScheme": "http",
-      "DownstreamHostAndPorts": [ { "Host": "invoice-service", "Port": 8080 } ],
       "RateLimitOptions": {
         "EnableRateLimiting": true,
         "Period": "1m",
@@ -103,32 +153,51 @@
         "ClientWhitelist": []
       },
       "UpstreamPathTemplate": "/api/invoices/{everything}",
-      "UpstreamHttpMethod": [ "GET", "POST" ]
+      "UpstreamHttpMethod": [
+        "GET",
+        "POST"
+      ],
+      "ServiceName": "invoice-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
     },
     {
       "//": "Rates are exposed through the gateway so the checkout page can show a live price without a second origin.",
       "DownstreamPathTemplate": "/api/rates",
       "DownstreamScheme": "http",
-      "DownstreamHostAndPorts": [ { "Host": "rate-service", "Port": 8080 } ],
       "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
-      "RateLimitOptions": { "EnableRateLimiting": false },
+      "RateLimitOptions": {
+        "EnableRateLimiting": false
+      },
       "UpstreamPathTemplate": "/api/rates",
-      "UpstreamHttpMethod": [ "GET" ]
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "ServiceName": "rate-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
     },
     {
       "DownstreamPathTemplate": "/api/rates/{everything}",
       "DownstreamScheme": "http",
-      "DownstreamHostAndPorts": [ { "Host": "rate-service", "Port": 8080 } ],
       "//RateLimitOptions": "Explicitly off. See the note in GlobalConfiguration.",
-      "RateLimitOptions": { "EnableRateLimiting": false },
+      "RateLimitOptions": {
+        "EnableRateLimiting": false
+      },
       "UpstreamPathTemplate": "/api/rates/{everything}",
-      "UpstreamHttpMethod": [ "GET" ]
+      "UpstreamHttpMethod": [
+        "GET"
+      ],
+      "ServiceName": "rate-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
     }
   ],
-
   "GlobalConfiguration": {
     "BaseUrl": "http://localhost:5000",
-
     "//RateLimitOptions": [
       "Client identity comes from X-Merchant-Id, which the gateway sets itself",
       "after validating the API key, so the quota is per MERCHANT rather than",
@@ -161,13 +230,29 @@
       "QuotaExceededMessage": "Rate limit exceeded. Slow down and retry after the period resets.",
       "HttpStatusCode": 429
     },
-
     "//RequestIdKey": [
       "Ocelot generates a request id under this header when one is absent and",
       "propagates it downstream. It is pointed at the same header the services",
       "already use, so the gateway becomes the place correlation ids originate",
       "and every service downstream sees an id that is already present."
     ],
-    "RequestIdKey": "X-Correlation-Id"
-  }
+    "RequestIdKey": "X-Correlation-Id",
+    "ServiceDiscoveryProvider": {
+      "Scheme": "http",
+      "Host": "consul",
+      "Port": 8500,
+      "Type": "Consul",
+      "PollingInterval": 1000
+    }
+  },
+  "//ServiceDiscovery": [
+    "Routes name a SERVICE, not a host and port. Ocelot asks Consul which",
+    "instances are registered under that name and healthy, and load balances",
+    "across them.",
+    "",
+    "This is the difference between discovery and configuration. Compose DNS",
+    "resolved a name to a container whether or not that container could serve a",
+    "request; Consul only returns instances whose health check is passing, so",
+    "an instance whose database has gone away is removed from rotation."
+  ]
 }

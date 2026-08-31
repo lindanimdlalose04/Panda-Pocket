@@ -1,0 +1,54 @@
+Panda Pocket - service registry verification (Consul)
+Captured: 2026-08-31 00:42 UTC
+
+=== containers ===
+NAME            STATE     STATUS
+pp-consul       running   Up 21 minutes (healthy)
+pp-gateway      running   Up 2 minutes (healthy)
+pp-invoice      running   Up 21 minutes (healthy)
+pp-merchant     running   Up 21 minutes (healthy)
+pp-mongo        running   Up 6 hours (healthy)
+pp-postgres     running   Up 6 hours (healthy)
+pp-rate         running   Up 21 minutes (healthy)
+pp-seq          running   Up 6 hours
+pp-settlement   running   Up 43 seconds (healthy)
+
+=== Consul catalogue: registered instances, addresses, health ===
+  SERVICE              INSTANCE ID                    HEALTH    
+  invoice-service      invoice-service-d8d9af58       passing   
+  merchant-service     merchant-service-0c0e6620      passing   
+  rate-service         rate-service-f62e5b52          passing   
+  settlement-service   settlement-service-cb6256b8    passing   
+
+=== registered addresses (what the gateway routes to) ===
+  rate-service         -> rate-service:8080
+  merchant-service     -> merchant-service:8080
+  invoice-service      -> invoice-service:8080
+  settlement-service   -> settlement-service:8080
+
+=== self-registration, from each service log ===
+  [00:20:50 INF] Registered rate-service-f62e5b52 with Consul as rate-service at rate-service:8080, health check every 10s
+  [00:20:52 INF] Registered merchant-service-0c0e6620 with Consul as merchant-service at merchant-service:8080, health check every 10s
+  [00:21:09 INF] Registered invoice-service-d8d9af58 with Consul as invoice-service at invoice-service:8080, health check every 10s
+  [00:41:30 INF] Registered settlement-service-cb6256b8 with Consul as settlement-service at settlement-service:8080, health check every 10s
+
+=== gateway routes resolved through Consul ===
+  GET  /api/rates                    -> HTTP 200
+  GET  /api/invoices                 -> HTTP 200
+  POST /api/auth/login               -> HTTP 200
+  GET  /api/settlements/{id}/balance -> HTTP 200
+
+=== the registry doing its job ===
+  docker compose stop settlement-service
+    -> the instance deregisters itself and leaves the catalogue
+    -> settlement routes stop resolving, every other route unaffected
+  docker compose start settlement-service
+    -> re-registers with a NEW instance id, health check passing
+    -> settlement routes resolve again, no gateway restart, no config change
+
+  Ocelot routes name a SERVICE, never a host or an IP:
+    /api/checkout/{everything}         -> service invoice-service
+    /api/settlements/{everything}      -> service settlement-service
+    /api/auth/{everything}             -> service merchant-service
+    /api/merchants                     -> service merchant-service
+    (10 routes total, none with a hardcoded host)
