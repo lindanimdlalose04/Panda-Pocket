@@ -38,6 +38,7 @@ public sealed class WebhookDispatcher(
     IServiceProvider services,
     IHttpClientFactory httpClientFactory,
     IOptions<WebhookOptions> options,
+    ISocEventPublisher soc,
     ILogger<WebhookDispatcher> logger) : BackgroundService
 {
     private readonly WebhookOptions _options = options.Value;
@@ -144,18 +145,33 @@ public sealed class WebhookDispatcher(
         {
             delivery.Status = Domain.WebhookStatus.Failed;
 
-            var soc = SocEvent.Create(
-                SocEventType.WebhookFailed, SocSeverity.Critical, delivery.Id.ToString(),
-                delivery.MerchantId, delivery.InvoiceId,
-                new Dictionary<string, object?>
+            soc.Publish(new SocEvent
+            {
+                EventType = SocEventType.WebhookFailed,
+                Severity = SocSeverity.High,
+                // The delivery row does not carry the correlation id of the
+                // payment that created it, so this event cannot be traced back
+                // to that request. The delivery id at least keeps it joinable to
+                // the delivery log. Threading the correlation id through
+                // settlement would need a migration on settlement_db, so it is
+                // recorded here as a known gap rather than faked.
+                CorrelationId = delivery.Id.ToString(),
+                UserId = delivery.MerchantId,
+                Endpoint = delivery.Url,
+                StatusCode = statusCode,
+                AffectedEntity = SocEntity.Ref(SocEntity.Webhook, delivery.Id),
+                Message =
+                    $"Webhook delivery dead-lettered after {delivery.AttemptCount} attempts against {delivery.Url}",
+                Metadata = new Dictionary<string, object?>
                 {
                     ["url"] = delivery.Url,
                     ["attempts"] = delivery.AttemptCount,
                     ["lastError"] = error,
-                    ["deadLettered"] = true
-                });
+                    ["deadLettered"] = true,
+                    ["invoiceId"] = delivery.InvoiceId
+                }
+            });
 
-            logger.LogError("SOC {EventType} {@SocEvent}", SocEventType.WebhookFailed, soc);
             return;
         }
 

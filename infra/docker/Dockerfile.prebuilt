@@ -1,0 +1,51 @@
+# Runtime-only image for a service that was already published on the host.
+#
+# WHY THIS EXISTS
+#
+# The multi-stage Dockerfile beside each service is still the real one, and the
+# one a clean clone uses: it restores and publishes inside the container so that
+# "docker compose up" works from nothing, which the deployment criterion depends
+# on. Nothing here replaces it.
+#
+# That build needs the .NET SDK image and roughly 2 GB of memory per service.
+# This development machine has 7.7 GB total and well under 1 GB spare, so six of
+# them took the build daemon down twice, and one image alone ran for over two
+# hours before failing. The compile was never the problem; doing it inside a
+# container on a memory-starved host was.
+#
+# So this variant compiles nothing. The host publishes to .artifacts/<service>,
+# that folder is the build context, and the image copies it. Building becomes a
+# file copy needing a couple of hundred megabytes rather than two gigabytes.
+#
+# It is the same split any CI pipeline uses: build once, ship the artefact. The
+# cost is that publishing is a separate command, which is why this is opt-in via
+# docker-compose.build.yml rather than the default.
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0
+
+WORKDIR /app
+
+# curl so Compose can probe /health. The ASP.NET image ships without it, and
+# later services wait on earlier ones being healthy rather than merely started.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# The build context is the service's own publish folder, so this is exactly what
+# it needs and nothing else. Keeping the context that small also means the
+# upload is megabytes rather than the whole repository.
+COPY . ./
+
+# Run as the non-root user the .NET images provide, rather than as root.
+USER $APP_UID
+
+EXPOSE 8080
+
+# Which assembly to start. Build arguments do not survive into the running
+# container, so it is promoted to an environment variable first.
+ARG ENTRY_DLL
+ENV ENTRY_DLL=${ENTRY_DLL}
+
+# Run through sh so the variable is expanded, but exec so dotnet still becomes
+# PID 1 and receives SIGTERM directly on shutdown rather than via a shell.
+ENTRYPOINT ["sh", "-c", "exec dotnet \"$ENTRY_DLL\""]

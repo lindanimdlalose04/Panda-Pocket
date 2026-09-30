@@ -8,6 +8,7 @@ using PandaPocket.Services.Invoice.Endpoints;
 using PandaPocket.Services.Invoice.Persistence;
 using PandaPocket.Shared.Contracts.Discovery;
 using PandaPocket.Shared.Contracts.Observability;
+using PandaPocket.Shared.Contracts.Soc;
 using Polly;
 using Serilog;
 
@@ -77,6 +78,30 @@ builder.Services.AddHttpClient<IRateClient, RateClient>((sp, client) =>
         {
             Log.Warning("Circuit to rate-service OPENED for {Break}s after {Ratio:P0} failures",
                 args.BreakDuration.TotalSeconds, invoiceOptions.CircuitFailureRatio);
+
+            // The breaker tripping is a dependency failure, and it is raised
+            // here rather than from the fallback path because this fires once
+            // per state change. The fallback fires per request, which is a
+            // different fact and now a different event.
+            //
+            // Nothing originated this from an inbound request, so there is no
+            // correlation id to inherit. One is minted so the event still joins
+            // to the fallbacks that follow it in the same window.
+            context.ServiceProvider.GetRequiredService<ISocEventPublisher>().Publish(new SocEvent
+            {
+                EventType = SocEventType.CircuitOpened,
+                Severity = SocSeverity.High,
+                CorrelationId = Guid.NewGuid().ToString("N")[..16],
+                AffectedEntity = SocEntity.Ref(SocEntity.Service, "rate-service"),
+                Message = $"Circuit to rate-service opened for {args.BreakDuration.TotalSeconds:F0}s",
+                Metadata = new Dictionary<string, object?>
+                {
+                    ["dependency"] = "rate-service",
+                    ["breakSeconds"] = args.BreakDuration.TotalSeconds,
+                    ["failureRatio"] = invoiceOptions.CircuitFailureRatio
+                }
+            });
+
             return default;
         },
         OnClosed = _ =>
@@ -107,6 +132,11 @@ builder.Services.AddHttpClient<ISettlementClient, SettlementClient>((sp, client)
 // with a health check Consul polls. Disabled unless configuration turns it
 // on, so the service still runs outside Compose.
 builder.Services.AddServiceRegistry(builder.Configuration);
+
+// Security events go to the log always, and on to the SOC service when it is
+// configured. Shipping is batched and out of band so a SOC outage cannot slow
+// down or fail the request that produced the event.
+builder.Services.AddSocEvents(builder.Configuration);
 
 builder.Services.AddScoped<InvoiceService>();
 builder.Services.AddHostedService<ExpirySweeper>();

@@ -18,6 +18,7 @@
 CREATE ROLE merchant_svc   LOGIN PASSWORD 'merchant_pw_dev';
 CREATE ROLE invoice_svc    LOGIN PASSWORD 'invoice_pw_dev';
 CREATE ROLE settlement_svc LOGIN PASSWORD 'settlement_pw_dev';
+CREATE ROLE soc_svc        LOGIN PASSWORD 'soc_pw_dev';
 
 -- ---------------------------------------------------------------------------
 -- 2. One database per service, owned by that service's role
@@ -28,6 +29,12 @@ CREATE DATABASE merchant_db   OWNER merchant_svc;
 CREATE DATABASE invoice_db    OWNER invoice_svc;
 CREATE DATABASE settlement_db OWNER settlement_svc;
 
+-- Phase 2. The SOC service reads events from every other service but owns them
+-- itself; no service writes here directly. Events arrive over HTTP so that the
+-- database-per-service boundary holds rather than being quietly broken by five
+-- services sharing one telemetry schema.
+CREATE DATABASE soc_db        OWNER soc_svc;
+
 -- ---------------------------------------------------------------------------
 -- 3. Close the default door
 --    Postgres grants CONNECT on every new database to PUBLIC, which means every
@@ -37,10 +44,12 @@ CREATE DATABASE settlement_db OWNER settlement_svc;
 REVOKE CONNECT ON DATABASE merchant_db   FROM PUBLIC;
 REVOKE CONNECT ON DATABASE invoice_db    FROM PUBLIC;
 REVOKE CONNECT ON DATABASE settlement_db FROM PUBLIC;
+REVOKE CONNECT ON DATABASE soc_db        FROM PUBLIC;
 
 GRANT CONNECT ON DATABASE merchant_db   TO merchant_svc;
 GRANT CONNECT ON DATABASE invoice_db    TO invoice_svc;
 GRANT CONNECT ON DATABASE settlement_db TO settlement_svc;
+GRANT CONNECT ON DATABASE soc_db        TO soc_svc;
 
 -- ---------------------------------------------------------------------------
 -- 4. Schema ownership
@@ -57,3 +66,6 @@ ALTER SCHEMA public OWNER TO invoice_svc;
 
 \connect settlement_db
 ALTER SCHEMA public OWNER TO settlement_svc;
+
+\connect soc_db
+ALTER SCHEMA public OWNER TO soc_svc;

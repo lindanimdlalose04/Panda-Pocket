@@ -29,6 +29,7 @@ public sealed class ApiKeyAuthenticationMiddleware(
     RequestDelegate next,
     IHttpClientFactory httpClientFactory,
     IMemoryCache cache,
+    ISocEventPublisher soc,
     ILogger<ApiKeyAuthenticationMiddleware> logger)
 {
     /// <summary>
@@ -94,6 +95,15 @@ public sealed class ApiKeyAuthenticationMiddleware(
     {
         // Strip first, unconditionally, before any routing decision. See above.
         context.Request.Headers.Remove(CorrelationHeaders.MerchantId);
+
+        // Stripped and re-set for the same reason, then stamped with the address
+        // the connection actually came from so services downstream attribute
+        // events to the caller rather than to the gateway.
+        context.Request.Headers.Remove(CorrelationHeaders.ForwardedFor);
+        if (context.Connection.RemoteIpAddress is { } remote)
+        {
+            context.Request.Headers[CorrelationHeaders.ForwardedFor] = remote.ToString();
+        }
 
         if (IsAnonymous(context.Request.Path))
         {
@@ -182,23 +192,27 @@ public sealed class ApiKeyAuthenticationMiddleware(
 
     private async Task RejectAsync(HttpContext context, string correlationId, string reason, string detail)
     {
-        var soc = SocEvent.Create(
-            reason == "missing_key" ? SocEventType.AuthFailed : SocEventType.ApiKeyInvalid,
-            SocSeverity.Warning,
-            correlationId,
-            metadata: new Dictionary<string, object?>
-            {
-                ["reason"] = reason,
-                ["path"] = context.Request.Path.Value,
-                ["method"] = context.Request.Method,
+        soc.Publish(new SocEvent
+        {
+            EventType = reason == "missing_key" ? SocEventType.AuthFailed : SocEventType.ApiKeyInvalid,
 
-                // The caller's address, so the SOC layer can spot one source
-                // trying many keys. This is the raw socket address; behind a real
-                // load balancer it would come from a forwarded header.
-                ["remoteIp"] = context.Connection.RemoteIpAddress?.ToString()
-            });
+            // MEDIUM, not HIGH. One rejected key is a typo far more often than
+            // it is an attack. Rule R1 raises HIGH when one address produces
+            // five of these inside five minutes, which is the shape a typo
+            // cannot make.
+            Severity = SocSeverity.Medium,
+            CorrelationId = correlationId,
 
-        logger.LogWarning("SOC {EventType} {@SocEvent}", soc.EventType, soc);
+            // The caller's address, so the SOC layer can spot one source trying
+            // many keys. This is the raw socket address; behind a real load
+            // balancer it would come from a forwarded header.
+            SourceIp = context.Connection.RemoteIpAddress?.ToString(),
+            Endpoint = context.Request.Path.Value,
+            HttpMethod = context.Request.Method,
+            StatusCode = StatusCodes.Status401Unauthorized,
+            Message = $"Request refused at the gateway ({reason})",
+            Metadata = new Dictionary<string, object?> { ["reason"] = reason }
+        });
 
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
         context.Response.ContentType = "application/problem+json";

@@ -48,7 +48,10 @@ try {
 
     Write-Host ""
     Write-Host "Seeding demo data..." -ForegroundColor Cyan
-    bash ./infra/seed-demo.sh
+    # PowerShell seeder, not seed-demo.sh. WSL bash is broken on this machine and
+    # a failing native command does not trip $ErrorActionPreference, so the bash
+    # version failed silently and left the reset finishing on an empty database.
+    & "$PSScriptRoot\seed-demo.ps1"
 
     Write-Host ""
     Write-Host "Clean demo state ready." -ForegroundColor Green

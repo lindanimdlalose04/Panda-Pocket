@@ -119,6 +119,9 @@ services:
       # 27018. Compose DNS resolves "mongo" to the container.
       Mongo__ConnectionString: mongodb://rate_svc:rate_pw_dev@mongo:27017/?authSource=admin
       Seq__ServerUrl: http://seq:5341
+      Soc__Enabled: "true"
+      Soc__IngestBaseUrl: http://soc-service:8080
+      Soc__ServiceName: rate-service
     ports:
       - "5003:8080"
     depends_on:
@@ -150,10 +153,27 @@ services:
   consul:
     image: hashicorp/consul:1.20
     container_name: pp-consul
+    # server_rejoin_age_max is raised from its seven-day default.
+    #
+    # Consul refuses to rejoin a cluster it has been absent from for longer than
+    # that, because in production a server returning after a week carries stale
+    # Raft state that could disrupt a healthy one. Here there is a single server,
+    # no cluster to disrupt, and leaving the project alone for three weeks is
+    # ordinary, so the check turns "start the stack" into "wipe the data dir
+    # first" and buys nothing.
+    #
+    # Wiping it is in fact harmless: the registry holds no durable state and
+    # every service re-registers itself on startup. That is precisely what
+    # self-registration buys, and it is why there is no volume here.
     command: >
       agent -server -bootstrap-expect=1 -ui
       -client=0.0.0.0 -bind=0.0.0.0
       -data-dir=/consul/data
+    environment:
+      # Passed as JSON rather than as an -hcl flag: the folded block above
+      # strips the quotes HCL needs, which produced "failed to parse flags-0.hcl"
+      # rather than anything resembling the real problem.
+      CONSUL_LOCAL_CONFIG: '{"server_rejoin_age_max": "8760h"}'
     ports:
       - "8500:8500"
     healthcheck:
@@ -187,6 +207,9 @@ services:
       ASPNETCORE_HTTP_PORTS: 8080
       ConnectionStrings__MerchantDb: "Host=postgres;Port=5432;Database=merchant_db;Username=merchant_svc;Password=merchant_pw_dev"
       Seq__ServerUrl: http://seq:5341
+      Soc__Enabled: "true"
+      Soc__IngestBaseUrl: http://soc-service:8080
+      Soc__ServiceName: merchant-service
       # A committed signing key is exactly as good as no authentication, because
       # anyone holding it can mint a token for any merchant. It is overridden
       # here to make the point that it belongs in the environment, and in a real
@@ -234,6 +257,9 @@ services:
       ConnectionStrings__SettlementDb: "Host=postgres;Port=5432;Database=settlement_db;Username=settlement_svc;Password=settlement_pw_dev"
       Services__MerchantBaseUrl: http://merchant-service:8080
       Seq__ServerUrl: http://seq:5341
+      Soc__Enabled: "true"
+      Soc__IngestBaseUrl: http://soc-service:8080
+      Soc__ServiceName: settlement-service
     ports:
       - "5004:8080"
     depends_on:
@@ -278,6 +304,9 @@ services:
       Invoice__RateServiceBaseUrl: http://rate-service:8080
       Invoice__SettlementServiceBaseUrl: http://settlement-service:8080
       Seq__ServerUrl: http://seq:5341
+      Soc__Enabled: "true"
+      Soc__IngestBaseUrl: http://soc-service:8080
+      Soc__ServiceName: invoice-service
     ports:
       - "5002:8080"
     depends_on:
@@ -288,6 +317,54 @@ services:
       rate-service:
         condition: service_healthy
       settlement-service:
+        condition: service_healthy
+      seq:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [pandapocket]
+
+  # ---------------------------------------------------------------------------
+  # SOC: security and operational event collection.
+  #
+  # Phase 2. Every other service publishes its security events here in batches
+  # over HTTP; this service owns soc_db and nothing else writes to it, so the
+  # database-per-service rule holds rather than being quietly broken by five
+  # services sharing one telemetry schema.
+  #
+  # Nothing depends_on this. The publisher in each service drops events rather
+  # than blocking when the collector is unreachable, so making payments wait for
+  # telemetry to start would trade a real capability for a cosmetic one. It also
+  # polls Consul for health transitions, which is the one event source no
+  # service can report about itself.
+  # ---------------------------------------------------------------------------
+  soc-service:
+    build:
+      context: .
+      dockerfile: src/Services/Soc.Api/Dockerfile
+    container_name: pp-soc
+    environment:
+      ServiceRegistry__Enabled: "true"
+      ServiceRegistry__ConsulUrl: http://consul:8500
+      ServiceRegistry__ServiceName: soc-service
+      ServiceRegistry__ServiceAddress: soc-service
+      ServiceRegistry__ServicePort: 8080
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: 8080
+      ConnectionStrings__SocDb: "Host=postgres;Port=5432;Database=soc_db;Username=soc_svc;Password=soc_pw_dev"
+      Soc__HealthPollEnabled: "true"
+      Soc__HealthPollSeconds: 10
+      Seq__ServerUrl: http://seq:5341
+    ports:
+      - "5005:8080"
+    depends_on:
+      consul:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
       seq:
         condition: service_started
@@ -316,6 +393,9 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_HTTP_PORTS: 8080
       Seq__ServerUrl: http://seq:5341
+      Soc__Enabled: "true"
+      Soc__IngestBaseUrl: http://soc-service:8080
+      Soc__ServiceName: gateway
       # Used by the API key middleware. A compose service name, like every other
       # service-to-service call in the system.
       Services__MerchantBaseUrl: http://merchant-service:8080

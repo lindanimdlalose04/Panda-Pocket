@@ -20,7 +20,7 @@ namespace PandaPocket.Gateway.Observability;
 /// written retry loop, and telling those apart is exactly the SOC layer's job,
 /// which is why this records the event rather than acting on it.
 /// </summary>
-public sealed class RateLimitEventMiddleware(RequestDelegate next, ILogger<RateLimitEventMiddleware> logger)
+public sealed class RateLimitEventMiddleware(RequestDelegate next, ISocEventPublisher soc)
 {
     public async Task InvokeAsync(HttpContext context)
     {
@@ -33,25 +33,31 @@ public sealed class RateLimitEventMiddleware(RequestDelegate next, ILogger<RateL
             ? id
             : (Guid?)null;
 
-        var soc = SocEvent.Create(
-            SocEventType.RateLimitExceeded,
-            SocSeverity.Warning,
-            context.GetCorrelationId(),
-            merchantId,
-            metadata: new Dictionary<string, object?>
-            {
-                ["path"] = context.Request.Path.Value,
-                ["method"] = context.Request.Method,
-                ["remoteIp"] = context.Connection.RemoteIpAddress?.ToString(),
+        soc.Publish(new SocEvent
+        {
+            EventType = SocEventType.RateLimitExceeded,
 
+            // MEDIUM on its own. One merchant briefly over quota is usually a
+            // retry loop, not an attack. Rule R2 is what decides whether the
+            // volume and spread make it something else.
+            Severity = SocSeverity.Medium,
+            CorrelationId = context.GetCorrelationId(),
+            UserId = merchantId,
+            SourceIp = context.Connection.RemoteIpAddress?.ToString(),
+            Endpoint = context.Request.Path.Value,
+            HttpMethod = context.Request.Method,
+            StatusCode = StatusCodes.Status429TooManyRequests,
+            Message = "Request throttled at the gateway after the merchant passed its quota",
+            AffectedEntity = merchantId is { } m ? SocEntity.Ref(SocEntity.Merchant, m) : null,
+            Metadata = new Dictionary<string, object?>
+            {
                 // Ocelot publishes the remaining quota and reset time in these
                 // headers, so capturing them means the event records how far over
                 // the limit the caller was rather than merely that they were.
                 ["retryAfter"] = context.Response.Headers["Retry-After"].FirstOrDefault(),
                 ["limit"] = context.Response.Headers["X-Rate-Limit-Limit"].FirstOrDefault()
-            });
-
-        logger.LogWarning("SOC {EventType} {@SocEvent}", SocEventType.RateLimitExceeded, soc);
+            }
+        });
     }
 }
 

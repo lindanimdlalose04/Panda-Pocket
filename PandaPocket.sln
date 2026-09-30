@@ -23,6 +23,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PandaPocket.Shared.Contract
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PandaPocket.Shared.Persistence", "src\Shared\Persistence\PandaPocket.Shared.Persistence.csproj", "{244469D2-F2F4-4543-8238-C5672C158012}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PandaPocket.Services.Soc", "src\Services\Soc.Api\PandaPocket.Services.Soc.csproj", "{F80C9C75-5996-412E-AE2E-A5CFEEA215BF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -60,6 +62,10 @@ Global
 		{244469D2-F2F4-4543-8238-C5672C158012}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{244469D2-F2F4-4543-8238-C5672C158012}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{244469D2-F2F4-4543-8238-C5672C158012}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F80C9C75-5996-412E-AE2E-A5CFEEA215BF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F80C9C75-5996-412E-AE2E-A5CFEEA215BF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F80C9C75-5996-412E-AE2E-A5CFEEA215BF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F80C9C75-5996-412E-AE2E-A5CFEEA215BF}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{B35242A0-B86C-4984-8DA3-313A41E4E2BA} = {E1DAC8EC-6691-4C8C-8977-E2A109C6FE2F}
@@ -71,5 +77,6 @@ Global
 		{53ED4FF8-E26E-42D9-AAA9-805BFB41F0E8} = {E1DAC8EC-6691-4C8C-8977-E2A109C6FE2F}
 		{D10BA7A3-AD41-495B-A6F0-73DD99EAD04E} = {53ED4FF8-E26E-42D9-AAA9-805BFB41F0E8}
 		{244469D2-F2F4-4543-8238-C5672C158012} = {53ED4FF8-E26E-42D9-AAA9-805BFB41F0E8}
+		{F80C9C75-5996-412E-AE2E-A5CFEEA215BF} = {5DBF01CF-6F32-4452-BA8C-D5ED6FB63894}
 	EndGlobalSection
 EndGlobal

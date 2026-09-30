@@ -103,7 +103,8 @@ public static class SettlementEndpoints
         {
             if (Forbidden(ctx, merchantId) is { } forbidden) return forbidden;
 
-            var (stored, recomputed, matches) = await service.ReconcileAsync(merchantId, ct);
+            var (stored, recomputed, matches) = await service.ReconcileAsync(
+                merchantId, ctx.GetCorrelationId(), ct);
             return Results.Ok(new ReconciliationResponse(merchantId, stored, recomputed, matches));
         })
         .WithName("Reconcile")

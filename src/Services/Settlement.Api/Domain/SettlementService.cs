@@ -10,6 +10,7 @@ namespace PandaPocket.Services.Settlement.Domain;
 public sealed class SettlementService(
     SettlementDbContext db,
     IMerchantClient merchantClient,
+    ISocEventPublisher soc,
     ILogger<SettlementService> logger)
 {
     public async Task<(SettlementResponse? Result, string? Error, bool AlreadySettled)> SettleAsync(
@@ -193,7 +194,8 @@ public sealed class SettlementService(
     /// figure. The stored balance is a cache; this is what proves the cache is
     /// honest, and it is the kind of check an auditor asks for.
     /// </summary>
-    public async Task<(decimal Stored, decimal Recomputed, bool Matches)> ReconcileAsync(Guid merchantId, CancellationToken ct)
+    public async Task<(decimal Stored, decimal Recomputed, bool Matches)> ReconcileAsync(
+        Guid merchantId, string correlationId, CancellationToken ct)
     {
         var stored = (await GetBalanceAsync(merchantId, ct)).AvailableZar;
 
@@ -205,9 +207,30 @@ public sealed class SettlementService(
 
         if (!matches)
         {
-            var soc = SocEvent.Create("LEDGER_MISMATCH", SocSeverity.Critical, "reconciliation", merchantId,
-                metadata: new Dictionary<string, object?> { ["stored"] = stored, ["recomputed"] = recomputed });
-            logger.LogError("SOC LEDGER_MISMATCH {@SocEvent}", soc);
+            // The event type was a bare "LEDGER_MISMATCH" string here, which is
+            // the precise drift the catalogue exists to stop: a type no rule
+            // filters on and no graph node ever matches. It is a catalogue
+            // constant now.
+            //
+            // CRITICAL, and the only event in the system graded that way. Every
+            // other event describes something a system under load does anyway.
+            // This one says the books do not add up, which is either a defect or
+            // tampering, and both mean stop paying out until somebody looks.
+            soc.Publish(new SocEvent
+            {
+                EventType = SocEventType.ReconcileMismatch,
+                Severity = SocSeverity.Critical,
+                CorrelationId = correlationId,
+                UserId = merchantId,
+                AffectedEntity = SocEntity.Ref(SocEntity.Ledger, merchantId),
+                Message = $"Stored balance R{stored} disagrees with the ledger sum R{recomputed}",
+                Metadata = new Dictionary<string, object?>
+                {
+                    ["stored"] = stored,
+                    ["recomputed"] = recomputed,
+                    ["differenceZar"] = stored - recomputed
+                }
+            });
         }
 
         return (stored, recomputed, matches);

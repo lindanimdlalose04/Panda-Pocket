@@ -49,9 +49,11 @@ call it makes goes through the gateway, never directly to a service.
 
 ### Seeding a demo
 
-```bash
-bash infra/seed-demo.sh
+```powershell
+.\infra\seed-demo.ps1
 ```
+
+On Linux or macOS, use `bash infra/seed-demo.sh` instead.
 
 Creates three merchants and eight invoices covering every state the machine can
 reach, including two left pending with checkout links printed. It works through

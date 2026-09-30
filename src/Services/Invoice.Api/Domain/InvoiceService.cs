@@ -8,11 +8,15 @@ using PandaPocket.Shared.Contracts.Soc;
 
 namespace PandaPocket.Services.Invoice.Domain;
 
+// ILogger is gone from here on purpose. Every log this class used to write was
+// the SOC event, and the publisher now writes that to the log and to the
+// collector. Keeping an injected logger nobody calls invites a future change to
+// log something that never reaches the SOC store.
 public sealed class InvoiceService(
     InvoiceDbContext db,
     IRateClient rateClient,
     IOptions<InvoiceOptions> options,
-    ILogger<InvoiceService> logger)
+    ISocEventPublisher soc)
 {
     private readonly InvoiceOptions _options = options.Value;
 
@@ -128,7 +132,7 @@ public sealed class InvoiceService(
         {
             await TransitionAsync(invoice, InvoiceStatus.Expired, "Payment attempted after expiry", correlationId, now, ct);
 
-            LogSoc(SocEventType.PaymentOnExpired, SocSeverity.Warning, correlationId, invoice.MerchantId, invoice.Id, new()
+            LogSoc(SocEventType.PaymentOnExpired, SocSeverity.Medium, correlationId, invoice.MerchantId, invoice.Id, new()
             {
                 ["txHash"] = txHash,
                 ["expiredAt"] = invoice.ExpiresAt
@@ -152,7 +156,7 @@ public sealed class InvoiceService(
         // one is gone, request a fresh invoice.
         if (invoice.Status == InvoiceStatus.Expired)
         {
-            LogSoc(SocEventType.PaymentOnExpired, SocSeverity.Warning, correlationId, invoice.MerchantId, invoice.Id, new()
+            LogSoc(SocEventType.PaymentOnExpired, SocSeverity.Medium, correlationId, invoice.MerchantId, invoice.Id, new()
             {
                 ["txHash"] = txHash,
                 ["expiredAt"] = invoice.ExpiresAt,
@@ -220,7 +224,7 @@ public sealed class InvoiceService(
             // duplicated confirmation, which is harmless and idempotent, or a
             // deliberate replay, which is not. Both are worth recording; the SOC
             // layer decides which by looking at the surrounding traffic.
-            LogSoc(SocEventType.PaymentReplay, SocSeverity.Critical, correlationId, invoice.MerchantId, invoice.Id, new()
+            LogSoc(SocEventType.PaymentReplay, SocSeverity.High, correlationId, invoice.MerchantId, invoice.Id, new()
             {
                 ["txHash"] = txHash,
                 ["amountCrypto"] = amountCrypto
@@ -241,7 +245,7 @@ public sealed class InvoiceService(
             return InvoiceResult.Ok(invoice);
         }
 
-        LogSoc(SocEventType.PaymentUnderpaid, SocSeverity.Warning, correlationId, invoice.MerchantId, invoice.Id, new()
+        LogSoc(SocEventType.PaymentUnderpaid, SocSeverity.Low, correlationId, invoice.MerchantId, invoice.Id, new()
         {
             ["txHash"] = txHash,
             ["expected"] = invoice.CryptoAmount,
@@ -361,14 +365,40 @@ public sealed class InvoiceService(
         ex.InnerException is Npgsql.PostgresException { SqlState: "23505" } pg &&
         (pg.ConstraintName?.Equals(constraintName, StringComparison.OrdinalIgnoreCase) ?? false);
 
+    /// <summary>
+    /// Raises one SOC event about the invoice being worked on.
+    ///
+    /// The publisher writes it twice: to the log, where Seq indexes every field
+    /// as a structured property, and to the SOC service, where detection rules
+    /// aggregate across it. Call sites need to know about neither.
+    /// </summary>
     private void LogSoc(string eventType, string severity, string correlationId,
         Guid? merchantId, Guid? invoiceId, Dictionary<string, object?> metadata)
     {
-        var soc = SocEvent.Create(eventType, severity, correlationId, merchantId, invoiceId, metadata);
-
-        // Logged as a structured property rather than interpolated into the
-        // message, so Seq indexes it and the graph loader in the next phase can
-        // read the fields without parsing text.
-        logger.LogInformation("SOC {EventType} {@SocEvent}", eventType, soc);
+        soc.Publish(new SocEvent
+        {
+            EventType = eventType,
+            Severity = severity,
+            CorrelationId = correlationId,
+            UserId = merchantId,
+            AffectedEntity = invoiceId is { } id ? SocEntity.Ref(SocEntity.Invoice, id) : null,
+            Message = MessageFor(eventType),
+            Metadata = metadata
+        });
     }
+
+    /// <summary>
+    /// A sentence for a human reading the event on its own. Rules never read
+    /// this; they read the typed fields. It exists so the SOC feed is legible
+    /// without knowing the catalogue by heart.
+    /// </summary>
+    private static string MessageFor(string eventType) => eventType switch
+    {
+        SocEventType.InvoiceCreated   => "Invoice created and a conversion rate locked for the payment window",
+        SocEventType.PaymentConfirmed => "Payment confirmed in full against the invoice",
+        SocEventType.PaymentUnderpaid => "Payment received for less than the invoiced amount",
+        SocEventType.PaymentOnExpired => "Payment attempted against an invoice whose window had closed",
+        SocEventType.PaymentReplay    => "A transaction hash already recorded was submitted again",
+        _ => eventType
+    };
 }

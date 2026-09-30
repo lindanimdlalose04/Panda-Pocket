@@ -40,6 +40,7 @@ public sealed class RateClient(
     HttpClient http,
     RateCache cache,
     IOptions<InvoiceOptions> options,
+    ISocEventPublisher soc,
     ILogger<RateClient> logger) : IRateClient
 {
     private readonly InvoiceOptions _options = options.Value;
@@ -130,18 +131,35 @@ public sealed class RateClient(
             "Serving a cached rate for {Pair} ({Reason}); the quote is {Seconds:F0}s old",
             pair, reason, staleness.TotalSeconds);
 
-        var soc = SocEvent.Create(
-            SocEventType.CircuitOpened, SocSeverity.Warning, correlationId,
-            metadata: new Dictionary<string, object?>
+        // RATE_FALLBACK_USED, not CIRCUIT_OPENED.
+        //
+        // This runs on every quote served from cache, which includes the calls
+        // before the breaker has seen enough failures to trip and every call
+        // while it is open. Labelling all of those as the circuit opening
+        // overstated a state change that happens once, and it left the SOC layer
+        // unable to count how many invoices were actually priced on a stale
+        // number. CIRCUIT_OPENED is now raised from the breaker's own OnOpened
+        // callback, where it means what it says.
+        //
+        // LOW on its own, because degrading gracefully is what this was built to
+        // do. Rule R7 is what notices a run of them alongside a rate-service
+        // outage and puts a rand figure on the exposure.
+        soc.Publish(new SocEvent
+        {
+            EventType = SocEventType.RateFallbackUsed,
+            Severity = SocSeverity.Low,
+            CorrelationId = correlationId,
+            AffectedEntity = SocEntity.Ref(SocEntity.Service, "rate-service"),
+            Message = $"Priced {pair} from a cached rate {staleness.TotalSeconds:F0}s old because the rate service was unreachable",
+            Metadata = new Dictionary<string, object?>
             {
                 ["dependency"] = "rate-service",
                 ["pair"] = pair,
                 ["reason"] = reason,
                 ["fallbackRate"] = cached.Rate,
                 ["stalenessSeconds"] = Math.Round(staleness.TotalSeconds, 1)
-            });
-
-        logger.LogWarning("SOC {EventType} {@SocEvent}", SocEventType.CircuitOpened, soc);
+            }
+        });
 
         return new RateResult(cached, IsFallback: true, Staleness: staleness);
     }

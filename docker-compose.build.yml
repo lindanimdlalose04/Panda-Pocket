@@ -1,0 +1,61 @@
+# Opt-in fast build path for a memory-constrained machine.
+#
+#   1.  publish on the host          (see infra/publish-local.ps1)
+#   2.  docker compose -f docker-compose.yml -f docker-compose.build.yml build
+#
+# This overlay changes only how the six .NET images are BUILT. Ports, networks,
+# environment, health checks and dependencies all still come from
+# docker-compose.yml, and running the stack is unchanged:
+#
+#   docker compose up -d
+#
+# Without this overlay, plain "docker compose build" still uses each service's
+# own multi-stage Dockerfile and compiles inside the container, which is what a
+# clean clone does and what the deployment criterion relies on. Nothing here
+# removes that path.
+#
+# See infra/docker/Dockerfile.prebuilt for why this exists.
+
+services:
+
+  soc-service:
+    build:
+      context: .artifacts/soc
+      dockerfile: ../../infra/docker/Dockerfile.prebuilt
+      args:
+        ENTRY_DLL: PandaPocket.Services.Soc.dll
+
+  gateway:
+    build:
+      context: .artifacts/gateway
+      dockerfile: ../../infra/docker/Dockerfile.prebuilt
+      args:
+        ENTRY_DLL: PandaPocket.Gateway.dll
+
+  merchant-service:
+    build:
+      context: .artifacts/merchant
+      dockerfile: ../../infra/docker/Dockerfile.prebuilt
+      args:
+        ENTRY_DLL: PandaPocket.Services.Merchant.dll
+
+  invoice-service:
+    build:
+      context: .artifacts/invoice
+      dockerfile: ../../infra/docker/Dockerfile.prebuilt
+      args:
+        ENTRY_DLL: PandaPocket.Services.Invoice.dll
+
+  rate-service:
+    build:
+      context: .artifacts/rate
+      dockerfile: ../../infra/docker/Dockerfile.prebuilt
+      args:
+        ENTRY_DLL: PandaPocket.Services.Rate.dll
+
+  settlement-service:
+    build:
+      context: .artifacts/settlement
+      dockerfile: ../../infra/docker/Dockerfile.prebuilt
+      args:
+        ENTRY_DLL: PandaPocket.Services.Settlement.dll

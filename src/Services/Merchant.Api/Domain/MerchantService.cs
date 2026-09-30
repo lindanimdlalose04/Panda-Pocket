@@ -6,7 +6,10 @@ using PandaPocket.Shared.Contracts.Soc;
 
 namespace PandaPocket.Services.Merchant.Domain;
 
-public sealed class MerchantService(MerchantDbContext db, ILogger<MerchantService> logger)
+public sealed class MerchantService(
+    MerchantDbContext db,
+    ISocEventPublisher soc,
+    ILogger<MerchantService> logger)
 {
     public async Task<(Merchant? Merchant, string? Error)> CreateAsync(CreateMerchantRequest request, CancellationToken ct)
     {
@@ -71,7 +74,7 @@ public sealed class MerchantService(MerchantDbContext db, ILogger<MerchantServic
             // attacker starts. It is logged as a security event for that reason,
             // with both URLs, so the SOC layer can correlate it with the login
             // that preceded it.
-            LogSoc(SocEventType.WebhookUrlChanged, SocSeverity.Warning, correlationId, merchant.Id, new()
+            LogSoc(SocEventType.WebhookUrlChanged, SocSeverity.High, correlationId, merchant.Id, new()
             {
                 ["previousUrl"] = previous,
                 ["newUrl"] = url
@@ -87,7 +90,7 @@ public sealed class MerchantService(MerchantDbContext db, ILogger<MerchantServic
     // API keys
     // -----------------------------------------------------------------------
     public async Task<(ApiKeyCreatedResponse? Key, string? Error)> CreateApiKeyAsync(
-        Guid merchantId, string label, CancellationToken ct)
+        Guid merchantId, string label, string correlationId, CancellationToken ct)
     {
         var merchant = await db.Merchants.FirstOrDefaultAsync(m => m.Id == merchantId, ct);
         if (merchant is null) return (null, "Merchant not found.");
@@ -109,6 +112,18 @@ public sealed class MerchantService(MerchantDbContext db, ILogger<MerchantServic
 
         logger.LogInformation("API key {KeyId} ({Prefix}...) issued for merchant {MerchantId}",
             key.Id, prefix, merchantId);
+
+        // INFO, because issuing a key is routine administration. It is recorded
+        // because of what it means in sequence: a key issued shortly after a run
+        // of rejected ones, or shortly before the payout address moves, is the
+        // middle step of an account takeover. Rule R5 reads that sequence, and
+        // it can only do so if the ordinary step was written down too.
+        LogSoc(SocEventType.ApiKeyIssued, SocSeverity.Info, correlationId, merchantId, new()
+        {
+            ["keyId"] = key.Id,
+            ["keyPrefix"] = prefix,
+            ["label"] = key.Label
+        });
 
         // The plaintext is returned here and then goes out of scope for ever.
         // Only the hash was persisted.
@@ -136,15 +151,25 @@ public sealed class MerchantService(MerchantDbContext db, ILogger<MerchantServic
     /// anything stored and never appears in a query. A failed validation says
     /// only that the key is invalid: distinguishing "no such key" from "revoked"
     /// would tell an attacker which of their guesses had once been real.
+    ///
+    /// NO SOC EVENT IS RAISED HERE, deliberately.
+    ///
+    /// This is an internal lookup on the gateway's behalf, not an observation of
+    /// a caller. The gateway already raised API_KEY_INVALID for the same attempt,
+    /// with the real client address; raising it again here recorded one attempt
+    /// twice, from a service that can only see the gateway's address. Rule R1
+    /// counts attempts per address, so the duplicates doubled every count while
+    /// attributing half of them to the gateway itself.
+    ///
+    /// The reason is still returned to the caller and still logged, so nothing
+    /// is lost for debugging. One attempt, one event, recorded where the actor
+    /// is actually visible.
     /// </summary>
     public async Task<ValidateKeyResponse> ValidateKeyAsync(string plainTextKey, string correlationId, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(plainTextKey) || !plainTextKey.StartsWith(ApiKeys.Prefix, StringComparison.Ordinal))
         {
-            LogSoc(SocEventType.ApiKeyInvalid, SocSeverity.Warning, correlationId, null, new()
-            {
-                ["reason"] = "malformed"
-            });
+            logger.LogDebug("Key validation refused a malformed key");
             return new ValidateKeyResponse(false, null, null, null, "Invalid API key.");
         }
 
@@ -156,17 +181,13 @@ public sealed class MerchantService(MerchantDbContext db, ILogger<MerchantServic
 
         if (key is null || !key.IsActive || key.Merchant is null)
         {
-            LogSoc(SocEventType.ApiKeyInvalid, SocSeverity.Warning, correlationId, key?.MerchantId, new()
-            {
-                ["reason"] = key is null ? "unknown" : "revoked",
-                ["keyPrefix"] = key?.KeyPrefix
-            });
+            logger.LogDebug("Key validation refused a key ({Reason})", key is null ? "unknown" : "revoked");
             return new ValidateKeyResponse(false, null, null, null, "Invalid API key.");
         }
 
         if (key.Merchant.Status != MerchantStatus.Active)
         {
-            LogSoc(SocEventType.AuthFailed, SocSeverity.Warning, correlationId, key.MerchantId, new()
+            LogSoc(SocEventType.AuthFailed, SocSeverity.Medium, correlationId, key.MerchantId, new()
             {
                 ["reason"] = "merchant_suspended"
             });
@@ -203,7 +224,7 @@ public sealed class MerchantService(MerchantDbContext db, ILogger<MerchantServic
 
         if (user is null || !passwordOk)
         {
-            LogSoc(SocEventType.AuthFailed, SocSeverity.Warning, correlationId, user?.MerchantId, new()
+            LogSoc(SocEventType.AuthFailed, SocSeverity.Medium, correlationId, user?.MerchantId, new()
             {
                 ["email"] = normalised,
                 ["reason"] = user is null ? "unknown_user" : "bad_password"
@@ -231,7 +252,24 @@ public sealed class MerchantService(MerchantDbContext db, ILogger<MerchantServic
     private void LogSoc(string eventType, string severity, string correlationId,
         Guid? merchantId, Dictionary<string, object?> metadata)
     {
-        var soc = SocEvent.Create(eventType, severity, correlationId, merchantId, null, metadata);
-        logger.LogWarning("SOC {EventType} {@SocEvent}", eventType, soc);
+        soc.Publish(new SocEvent
+        {
+            EventType = eventType,
+            Severity = severity,
+            CorrelationId = correlationId,
+            UserId = merchantId,
+            AffectedEntity = merchantId is { } id ? SocEntity.Ref(SocEntity.Merchant, id) : null,
+            Message = MessageFor(eventType),
+            Metadata = metadata
+        });
     }
+
+    private static string MessageFor(string eventType) => eventType switch
+    {
+        SocEventType.WebhookUrlChanged => "The merchant's payout webhook destination was changed",
+        SocEventType.ApiKeyInvalid     => "An API key was presented that does not resolve to a live merchant",
+        SocEventType.AuthFailed        => "Dashboard credentials were rejected",
+        SocEventType.ApiKeyIssued      => "A new API key was issued for the merchant",
+        _ => eventType
+    };
 }

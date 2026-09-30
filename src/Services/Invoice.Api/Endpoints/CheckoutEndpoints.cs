@@ -5,6 +5,7 @@ using PandaPocket.Services.Invoice.Domain;
 using PandaPocket.Services.Invoice.Persistence;
 using PandaPocket.Shared.Contracts.Invoicing;
 using PandaPocket.Shared.Contracts.Observability;
+using PandaPocket.Shared.Contracts.Soc;
 
 namespace PandaPocket.Services.Invoice.Endpoints;
 
@@ -29,7 +30,8 @@ public static class CheckoutEndpoints
     {
         var group = app.MapGroup("/api/checkout").WithTags("Checkout");
 
-        group.MapGet("/{id:guid}", async (Guid id, InvoiceDbContext db, CancellationToken ct) =>
+        group.MapGet("/{id:guid}", async (
+            Guid id, InvoiceDbContext db, ISocEventPublisher soc, HttpContext ctx, CancellationToken ct) =>
         {
             var invoice = await db.Invoices
                 .AsNoTracking()
@@ -38,6 +40,35 @@ public static class CheckoutEndpoints
 
             if (invoice is null)
             {
+                // Because the id is the bearer token for this page, a request
+                // for one that does not exist is somebody holding a link that
+                // was never issued. Almost always that is a stale or mistyped
+                // link, which is why this is LOW.
+                //
+                // In volume from one address it is object enumeration: working
+                // through ids hoping to land on another merchant's invoice.
+                // CWE-639, OWASP API1:2023. Rule R6 is what tells the two apart,
+                // and it can only do that because the misses are recorded at all.
+                soc.Publish(new SocEvent
+                {
+                    EventType = SocEventType.CheckoutEnumeration,
+                    Severity = SocSeverity.Low,
+                    CorrelationId = ctx.GetCorrelationId(),
+
+                    // SourceIp is deliberately left unset. Inside a service the
+                    // socket address is the gateway's, identical for every
+                    // caller, and rule R6 counts enumeration attempts per
+                    // address. The publisher fills this from X-Forwarded-For,
+                    // which the gateway stamps with the real client. Setting it
+                    // here would win over that and put the gateway's own address
+                    // on every row.
+                    Endpoint = "/api/checkout/{id}",
+                    HttpMethod = HttpMethods.Get,
+                    StatusCode = StatusCodes.Status404NotFound,
+                    AffectedEntity = SocEntity.Ref(SocEntity.Invoice, id),
+                    Message = "Checkout requested for an invoice id that does not exist"
+                });
+
                 return Results.Problem(title: "Invoice not found",
                     detail: "This payment link is not valid.", statusCode: StatusCodes.Status404NotFound);
             }

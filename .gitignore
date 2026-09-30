@@ -23,3 +23,21 @@ Thumbs.db
 
 # Docs build output
 docs/**/*.bak
+
+# Build tooling for the Word report (node_modules, intermediates)
+.build/
+
+# Host-published service output, consumed by the fast image build
+.artifacts/
+
+# Agent instructions, local only
+CLAUDE.md
+
+# University submission material, kept local, never pushed
+docs/DELIVERABLE-1.md
+docs/Panda-Pocket-Deliverable-1.docx
+docs/screenshots/
+docs/notes/VIDEO-SCRIPT.md
+docs/notes/DEMO-SCRIPT.md
+docs/notes/TECHNICAL-REPORT.md
+docs/PHASE-2-PLAN.md

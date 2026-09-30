@@ -121,12 +121,13 @@ public static class MerchantEndpoints
         var group = app.MapGroup("/api").WithTags("API keys").RequireAuthorization();
 
         group.MapPost("/merchants/{id:guid}/api-keys", async (
-            Guid id, CreateApiKeyRequest request, MerchantService service, ClaimsPrincipal principal, CancellationToken ct) =>
+            Guid id, CreateApiKeyRequest request, MerchantService service, ClaimsPrincipal principal,
+            HttpContext ctx, CancellationToken ct) =>
         {
             if (Validate(request) is { } problem) return problem;
             if (Forbidden(principal, id) is { } forbidden) return forbidden;
 
-            var (key, error) = await service.CreateApiKeyAsync(id, request.Label, ct);
+            var (key, error) = await service.CreateApiKeyAsync(id, request.Label, ctx.GetCorrelationId(), ct);
 
             return key is null
                 ? Results.Problem(title: "Could not create key", detail: error, statusCode: StatusCodes.Status404NotFound)

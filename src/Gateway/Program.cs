@@ -7,6 +7,7 @@ using Ocelot.DependencyInjection;
 using Ocelot.Middleware;
 using Ocelot.Provider.Consul;
 using PandaPocket.Shared.Contracts.Observability;
+using PandaPocket.Shared.Contracts.Soc;
 using Serilog;
 
 // ---------------------------------------------------------------------------
@@ -75,6 +76,11 @@ builder.Services.AddHttpClient("merchant", client =>
 
 // Backs the short-lived cache of validated keys.
 builder.Services.AddMemoryCache();
+
+// The gateway is the busiest source of security events, because every rejected
+// credential and every throttled request is seen here first. Shipping is batched
+// and out of band so telemetry cannot slow the request path.
+builder.Services.AddSocEvents(builder.Configuration);
 
 // The browser client is served from the gateway's own origin, so its fetch
 // calls are same-origin and no CORS configuration is needed. That is a
