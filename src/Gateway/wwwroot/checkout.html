@@ -5,10 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pay with crypto | Panda Pocket</title>
   <style>
+    /* The same palette as app.css, kept inline rather than linked.
+     *
+     * This page is the only one a customer sees. It carries no navigation, no
+     * API key and no console chrome, because whoever is paying is not an
+     * operator, and loading the console's stylesheet would invite that
+     * furniture back in. The tokens are therefore copied, and the one rule to
+     * remember when either changes is that these two palettes are the same
+     * product. */
     :root {
-      --bg: #0f1115; --panel: #171a21; --line: #262b36;
-      --ink: #e8eaed; --muted: #9aa4b2; --accent: #4ade80;
-      --warn: #fbbf24; --bad: #f87171; --info: #60a5fa;
+      --bg: #0A0C10; --panel: #11141A; --surface-2: #161A22; --line: #232936;
+      --ink: #E7EBF0; --muted: #8B95A5; --faint: #5C6675;
+      --accent: #3DDC97; --accent-ink: #04170E;
+      --warn: #F2B134; --bad: #FF6B6B; --info: #6AA6FF;
     }
     * { box-sizing: border-box; }
     body {
@@ -25,14 +34,15 @@
       border-radius: 12px; padding: 22px;
     }
     .amount { text-align: center; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
-    .amount .zar { font-size: 32px; font-weight: 680; letter-spacing: -.02em; }
+    .amount .zar { font-size: 32px; font-weight: 680; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
     .amount .ref { color: var(--muted); font-size: 13px; margin-top: 2px; }
     .crypto {
       margin: 18px 0; padding: 14px; border-radius: 9px;
-      background: #0d0f14; border: 1px solid var(--line); text-align: center;
+      background: var(--surface-2); border: 1px solid var(--line); text-align: center;
     }
     .crypto .big {
-      font-family: ui-monospace, Consolas, monospace;
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+      font-variant-numeric: tabular-nums;
       font-size: 21px; font-weight: 650; color: var(--accent); word-break: break-all;
     }
     .crypto .rate { color: var(--muted); font-size: 11px; margin-top: 4px; }
@@ -43,7 +53,7 @@
       display: flex; gap: 8px; align-items: stretch;
     }
     .addr code {
-      flex: 1; background: #0d0f14; border: 1px solid var(--line); border-radius: 7px;
+      flex: 1; background: var(--surface-2); border: 1px solid var(--line); border-radius: 7px;
       padding: 10px; font-family: ui-monospace, Consolas, monospace; font-size: 11px;
       word-break: break-all; color: var(--ink);
     }
@@ -52,14 +62,14 @@
       font-weight: 650; padding: 10px 14px;
     }
     .copy { background: transparent; color: var(--ink); border: 1px solid var(--line); white-space: nowrap; }
-    .pay { width: 100%; margin-top: 18px; background: var(--accent); color: #06240f; padding: 12px; }
+    .pay { width: 100%; margin-top: 18px; background: var(--accent); color: var(--accent-ink); padding: 12px; }
     .pay:hover { filter: brightness(1.08); }
     .pay:disabled { opacity: .45; cursor: not-allowed; }
     .under { width: 100%; margin-top: 8px; background: transparent;
       color: var(--muted); border: 1px solid var(--line); }
     .timer {
       margin-top: 18px; text-align: center; padding: 12px;
-      border-radius: 9px; background: #0d0f14; border: 1px solid var(--line);
+      border-radius: 9px; background: var(--surface-2); border: 1px solid var(--line);
     }
     .timer .t { font-family: ui-monospace, Consolas, monospace; font-size: 26px; font-weight: 650; }
     .timer .l { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }

@@ -377,6 +377,104 @@ services:
     networks: [pandapocket]
 
   # ---------------------------------------------------------------------------
+  # Neo4j: the security knowledge graph.
+  #
+  # Phase 2. Holds three subgraphs that only mean something together: the
+  # application's own topology, the events and alerts the SOC layer produced, and
+  # curated security knowledge. A question like "which services does this alert
+  # put at risk, and what mitigates the threat behind it" is a path across all
+  # three, which is why it is a graph and not three more tables.
+  #
+  # Memory is capped hard and deliberately. Neo4j sizes its heap and page cache
+  # from available RAM by default, and on a 7.7 GB machine already running nine
+  # containers that assumption ends with the JVM and Docker fighting over pages.
+  # 512 MB of heap and 128 MB of page cache is far below any production figure
+  # and ample for a graph of a few thousand nodes.
+  # ---------------------------------------------------------------------------
+  neo4j:
+    image: neo4j:5-community
+    container_name: pp-neo4j
+    environment:
+      # Local development credentials, committed on purpose so that a clean
+      # clone comes up with one command. The same reasoning as the Postgres
+      # passwords above.
+      NEO4J_AUTH: neo4j/panda_graph_dev
+
+      NEO4J_server_memory_heap_initial__size: 256m
+      NEO4J_server_memory_heap_max__size: 512m
+      NEO4J_server_memory_pagecache_size: 128m
+
+      # The browser is served from the host, so it must advertise a bolt address
+      # the host can actually reach rather than the container name.
+      NEO4J_server_bolt_advertised__address: localhost:7687
+    ports:
+      - "7474:7474"   # Neo4j Browser, for the demonstration
+      - "7687:7687"   # Bolt, for the Graph service
+    volumes:
+      - neo4jdata:/data
+    healthcheck:
+      # The HTTP endpoint rather than cypher-shell: it answers as soon as the
+      # database is accepting traffic, and needs no credentials on the probe.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks: [pandapocket]
+
+  # ---------------------------------------------------------------------------
+  # Graph: the only service that talks to Neo4j.
+  #
+  # Owns no source data. Everything in the graph is a projection of something
+  # another service already owns, which is what keeps the database-per-service
+  # boundary intact rather than quietly making Neo4j a second home for
+  # everyone's data, and what makes the graph safe to drop and rebuild.
+  #
+  # ocelot.json is mounted read-only: the graph reads the SAME routing table the
+  # gateway routes from, not a copy. A copy would be one more thing to keep in
+  # step, and a graph claiming the system exposes an endpoint it no longer does
+  # is worse than a graph with a gap in it.
+  # ---------------------------------------------------------------------------
+  graph-service:
+    build:
+      context: .
+      dockerfile: src/Services/Graph.Api/Dockerfile
+    container_name: pp-graph
+    environment:
+      ServiceRegistry__Enabled: "true"
+      ServiceRegistry__ConsulUrl: http://consul:8500
+      ServiceRegistry__ServiceName: graph-service
+      ServiceRegistry__ServiceAddress: graph-service
+      ServiceRegistry__ServicePort: 8080
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: 8080
+      Graph__Uri: bolt://neo4j:7687
+      Graph__Username: neo4j
+      Graph__Password: panda_graph_dev
+      Graph__ConsulUrl: http://consul:8500
+      Graph__SocBaseUrl: http://soc-service:8080
+      Graph__OcelotConfigPath: /app/config/ocelot.json
+      Seq__ServerUrl: http://seq:5341
+    volumes:
+      - ./src/Gateway/ocelot.json:/app/config/ocelot.json:ro
+    ports:
+      - "5006:8080"
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      consul:
+        condition: service_healthy
+      seq:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    networks: [pandapocket]
+
+  # ---------------------------------------------------------------------------
   # Gateway: the single public entry point.
   #
   # Routes by path to the services above, using compose service names that
@@ -420,6 +518,7 @@ services:
 
 volumes:
   pgdata:
+  neo4jdata:
   mongodata:
   seqdata:
 

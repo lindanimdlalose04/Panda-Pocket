@@ -13,6 +13,37 @@
     "",
     "Rate limiting and the API key authentication handler are added on days 4 and 6."
   ],
+  "//OperatorRoutes": [
+      "The SOC console and the ask page, added so that alerts are DISPLAYED",
+      "rather than read as Swagger JSON. Two decisions are worth recording.",
+      "",
+      "First, every one of these routes carries an explicit RateLimitOptions",
+      "block, as every other route does. With a global ClientIdHeader set,",
+      "Ocelot applies a default empty rule to any route that does not opt out,",
+      "then cannot identify the client and answers 503. Omitting the block is",
+      "the bug that silently broke /api/rates, /api/auth/login and",
+      "/api/checkout for a whole day on day 7.",
+      "",
+      "Second, what is NOT routed here is deliberate:",
+      "",
+      "  POST /api/soc/events is the ingestion path. Services reach it",
+      "  directly on the compose network. Exposing it through the gateway",
+      "  would let anyone inject fabricated security events into the system's",
+      "  own evidence, which is the one thing this phase has to be",
+      "  trustworthy about. GET /api/soc/events is routed; POST is not, and",
+      "  Ocelot matches on method as well as path, so a POST here is a 404",
+      "  at the gateway.",
+      "",
+      "  /api/graph/load/* and /api/graph/evaluate rebuild and benchmark the",
+      "  graph. They are operator jobs run deliberately against port 5006,",
+      "  not something a browser page should be able to trigger.",
+      "",
+      "The honest gap: these routes sit behind the same API key as the",
+      "payment endpoints, so any merchant's key can read the whole platform",
+      "alert feed. The system has no operator role to check instead. The",
+      "report says so rather than hiding it."
+  ],
+
   "Routes": [
     {
       "//": "Customer-facing checkout. Public: the invoice GUID is the bearer token.",
@@ -194,6 +225,168 @@
       "LoadBalancerOptions": {
         "Type": "RoundRobin"
       }
+    },
+    {
+      "//": "Event counts by type and service, for the SOC console header.",
+      "DownstreamPathTemplate": "/api/soc/summary",
+      "DownstreamScheme": "http",
+      "RateLimitOptions": {
+        "EnableRateLimiting": true,
+        "Period": "1m",
+        "PeriodTimespan": 60,
+        "Limit": 120,
+        "ClientWhitelist": []
+      },
+      "UpstreamPathTemplate": "/api/soc/summary",
+      "UpstreamHttpMethod": [ "GET" ],
+      "ServiceName": "soc-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
+    },
+    {
+      "//": "The rule catalogue. Read-only: rules are seeded by the engine, not edited here.",
+      "DownstreamPathTemplate": "/api/soc/rules",
+      "DownstreamScheme": "http",
+      "RateLimitOptions": {
+        "EnableRateLimiting": true,
+        "Period": "1m",
+        "PeriodTimespan": 60,
+        "Limit": 120,
+        "ClientWhitelist": []
+      },
+      "UpstreamPathTemplate": "/api/soc/rules",
+      "UpstreamHttpMethod": [ "GET" ],
+      "ServiceName": "soc-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
+    },
+    {
+      "//": "The alert list the SOC console renders.",
+      "DownstreamPathTemplate": "/api/soc/alerts",
+      "DownstreamScheme": "http",
+      "RateLimitOptions": {
+        "EnableRateLimiting": true,
+        "Period": "1m",
+        "PeriodTimespan": 60,
+        "Limit": 120,
+        "ClientWhitelist": []
+      },
+      "UpstreamPathTemplate": "/api/soc/alerts",
+      "UpstreamHttpMethod": [ "GET" ],
+      "ServiceName": "soc-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
+    },
+    {
+      "//": "One alert with its rule and every event behind it, and the triage POST to /status.",
+      "DownstreamPathTemplate": "/api/soc/alerts/{everything}",
+      "DownstreamScheme": "http",
+      "RateLimitOptions": {
+        "EnableRateLimiting": true,
+        "Period": "1m",
+        "PeriodTimespan": 60,
+        "Limit": 120,
+        "ClientWhitelist": []
+      },
+      "UpstreamPathTemplate": "/api/soc/alerts/{everything}",
+      "UpstreamHttpMethod": [ "GET", "POST" ],
+      "ServiceName": "soc-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
+    },
+    {
+      "//": "Collected events. GET ONLY, deliberately: see the note below the routes.",
+      "DownstreamPathTemplate": "/api/soc/events",
+      "DownstreamScheme": "http",
+      "RateLimitOptions": {
+        "EnableRateLimiting": true,
+        "Period": "1m",
+        "PeriodTimespan": 60,
+        "Limit": 120,
+        "ClientWhitelist": []
+      },
+      "UpstreamPathTemplate": "/api/soc/events",
+      "UpstreamHttpMethod": [ "GET" ],
+      "ServiceName": "soc-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
+    },
+    {
+      "//": "Node and relationship counts, so the console can state the graph's size.",
+      "DownstreamPathTemplate": "/api/graph/stats",
+      "DownstreamScheme": "http",
+      "RateLimitOptions": {
+        "EnableRateLimiting": true,
+        "Period": "1m",
+        "PeriodTimespan": 60,
+        "Limit": 120,
+        "ClientWhitelist": []
+      },
+      "UpstreamPathTemplate": "/api/graph/stats",
+      "UpstreamHttpMethod": [ "GET" ],
+      "ServiceName": "graph-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
+    },
+    {
+      "//": "Services with their endpoints, assets and dependencies, as the graph holds them.",
+      "DownstreamPathTemplate": "/api/graph/topology",
+      "DownstreamScheme": "http",
+      "RateLimitOptions": {
+        "EnableRateLimiting": true,
+        "Period": "1m",
+        "PeriodTimespan": 60,
+        "Limit": 120,
+        "ClientWhitelist": []
+      },
+      "UpstreamPathTemplate": "/api/graph/topology",
+      "UpstreamHttpMethod": [ "GET" ],
+      "ServiceName": "graph-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
+    },
+    {
+      "//": "Retrieve then generate. The question box on the ask page posts here.",
+      "DownstreamPathTemplate": "/api/graph/ask",
+      "DownstreamScheme": "http",
+      "RateLimitOptions": {
+        "EnableRateLimiting": true,
+        "Period": "1m",
+        "PeriodTimespan": 60,
+        "Limit": 120,
+        "ClientWhitelist": []
+      },
+      "UpstreamPathTemplate": "/api/graph/ask",
+      "UpstreamHttpMethod": [ "POST" ],
+      "ServiceName": "graph-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
+    },
+    {
+      "//": "Evidence without prose, for showing what retrieval found on its own.",
+      "DownstreamPathTemplate": "/api/graph/retrieve",
+      "DownstreamScheme": "http",
+      "RateLimitOptions": {
+        "EnableRateLimiting": true,
+        "Period": "1m",
+        "PeriodTimespan": 60,
+        "Limit": 120,
+        "ClientWhitelist": []
+      },
+      "UpstreamPathTemplate": "/api/graph/retrieve",
+      "UpstreamHttpMethod": [ "POST" ],
+      "ServiceName": "graph-service",
+      "LoadBalancerOptions": {
+        "Type": "RoundRobin"
+      }
     }
   ],
   "GlobalConfiguration": {
@@ -206,8 +399,9 @@
       "from one credential. Per-IP would lump every merchant behind a corporate",
       "NAT into a single bucket.",
       "",
-      "Limits apply to the invoice write path only. Rates are public market data",
-      "that a checkout page polls legitimately every few seconds.",
+      "Limits apply to the invoice write path and to the operator routes that",
+      "serve the SOC console. Rates are public market data that a checkout",
+      "page polls legitimately every few seconds.",
       "",
       "Every route carries an explicit RateLimitOptions block, including the",
       "ones that are not limited. That is not verbosity for its own sake: with a",

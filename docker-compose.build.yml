@@ -59,3 +59,10 @@ services:
       dockerfile: ../../infra/docker/Dockerfile.prebuilt
       args:
         ENTRY_DLL: PandaPocket.Services.Settlement.dll
+
+  graph-service:
+    build:
+      context: .artifacts/graph
+      dockerfile: ../../infra/docker/Dockerfile.prebuilt
+      args:
+        ENTRY_DLL: PandaPocket.Services.Graph.dll

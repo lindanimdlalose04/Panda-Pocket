@@ -1,0 +1,241 @@
+<mxfile host="Electron" modified="2026-10-15T18:11:55.280Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/24.6.1 Chrome/124.0.6367.207 Electron/30.0.6 Safari/537.36" version="24.6.1" etag="88XcztQu_ntD7z9i-0IZ" type="device">
+  <diagram name="System architecture, Phase 2" id="arch-2">
+    <mxGraphModel dx="1276" dy="606" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1150" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" value="Panda Pocket: system architecture after Phase 2" style="text;html=1;align=left;verticalAlign=middle;fontSize=16;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+          <mxGeometry x="40" y="20" width="700" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="clientBox" value="Browser client&#xa;merchant dashboard  ·  customer checkout" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=11;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="360" y="80" width="330" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="clientSoc" value="&lt;b&gt;SOC console  ·  Ask the graph&lt;/b&gt;&#xa;served by the same gateway, same API key" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#000000;fontColor=#000000;fontSize=11;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="730" y="80" width="330" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="dockerBoundary" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;dashed=1;verticalAlign=top;align=left;spacingLeft=8;spacingTop=4;fontColor=#000000;fontSize=10;" parent="1" vertex="1">
+          <mxGeometry x="40" y="170" width="1500" height="770" as="geometry" />
+        </mxCell>
+        <mxCell id="dockerLabel" value="Docker Compose network &quot;pandapocket&quot;, twelve containers. Routes name a service; Consul answers with the healthy instances registered under that name." style="text;html=1;align=left;verticalAlign=middle;fontSize=10;fontStyle=2;fontColor=#000000;" parent="1" vertex="1">
+          <mxGeometry x="50" y="180" width="1200" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="consulBox" value="&lt;b&gt;Consul&lt;/b&gt;  service registry&#xa;&#xa;each service registers itself on startup&#xa;and deregisters on shutdown&#xa;health check polled every 10s&#xa;UI on :8500" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;" parent="1" vertex="1">
+          <mxGeometry x="60" y="210" width="270" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="gateway" value="&lt;b&gt;API Gateway&lt;/b&gt; (Ocelot) : 8080&#xa;&#xa;routing by path  ·  API key authentication  ·  rate limiting (429)&#xa;correlation id minted here  ·  serves the client pages&#xa;&lt;b&gt;new:&lt;/b&gt; routes /api/soc/* and /api/graph/* read only;&#xa;event ingestion and the graph loaders are deliberately not routed" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=11;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="540" y="205" width="430" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="webhookOut" value="Merchant&#39;s own server&#xa;(HMAC-signed webhook)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;dashed=1;fontColor=#000000;fontSize=10;" parent="1" vertex="1">
+          <mxGeometry x="1270" y="210" width="220" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="svcMerchant" value="&lt;b&gt;Merchant&lt;/b&gt;&#xa;accounts, hashed&#xa;API keys, JWT" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="70" y="380" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="svcInvoice" value="&lt;b&gt;Invoice&lt;/b&gt;&#xa;payment lifecycle,&#xa;state machine" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="310" y="380" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="svcSettlement" value="&lt;b&gt;Settlement&lt;/b&gt;&#xa;ZAR ledger, fees,&#xa;webhook dispatch&#xa;&lt;i&gt;new: row lock on balance&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="550" y="380" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="svcRate" value="&lt;b&gt;Rate&lt;/b&gt;&#xa;ZAR quotes,&#xa;GBM simulator" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=11;" parent="1" vertex="1">
+          <mxGeometry x="900" y="390" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="pgBoundary" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;dashed=1;" parent="1" vertex="1">
+          <mxGeometry x="60" y="500" width="700" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="pgLabel" value="One PostgreSQL 16 container. Four databases now, one login role each,&#xa;CONNECT revoked from PUBLIC. A role cannot reach another&#39;s database." style="text;html=1;align=center;verticalAlign=middle;fontSize=9;fontStyle=2;fontColor=#000000;" parent="1" vertex="1">
+          <mxGeometry x="70" y="588" width="680" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="dbMerchant" value="merchant_db&#xa;merchant_svc" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;" parent="1" vertex="1">
+          <mxGeometry x="90" y="512" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="dbInvoice" value="invoice_db&#xa;invoice_svc" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;" parent="1" vertex="1">
+          <mxGeometry x="330" y="512" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="dbSettlement" value="settlement_db&#xa;settlement_svc" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;" parent="1" vertex="1">
+          <mxGeometry x="570" y="512" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="dbRate" value="rate_db&#xa;MongoDB 7&#xa;tick history" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;" parent="1" vertex="1">
+          <mxGeometry x="870" y="512" width="140" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="seq" value="&lt;b&gt;Seq&lt;/b&gt;&#xa;centralised structured logging&#xa;every service ships Serilog events&#xa;stamped with X-Correlation-Id" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#000000;fontColor=#000000;fontSize=10;dashed=1;" parent="1" vertex="1">
+          <mxGeometry x="1270" y="380" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="p2Label" value="Phase 2: the security layer. Downstream of everything and upstream of nothing, so it can never block a payment." style="text;html=1;align=left;verticalAlign=middle;fontSize=10;fontStyle=2;fontColor=#000000;" parent="1" vertex="1">
+          <mxGeometry x="70" y="660" width="900" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="socService" value="&lt;b&gt;SOC service&lt;/b&gt; : 8080&#xa;&#xa;receives security events from every service&#xa;six detection rules, raw SQL, on a 20s timer&#xa;raises and updates alerts, suppression per source&#xa;groups related alerts into incidents" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#000000;fontColor=#000000;fontSize=11;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="70" y="690" width="390" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="graphService" value="&lt;b&gt;Graph service&lt;/b&gt; : 8080&#xa;&#xa;builds the knowledge graph from three sources&#xa;RAG: retrieve then generate&#xa;three retrieval routes (Cypher, vector, hybrid)&#xa;evidence envelope returned with every answer" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#000000;fontColor=#000000;fontSize=11;verticalAlign=middle;" parent="1" vertex="1">
+          <mxGeometry x="560" y="690" width="390" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="dbSoc" value="soc_db&#xa;soc_svc&#xa;events, rules,&#xa;alerts, incidents" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=#FFF2CC;strokeColor=#000000;fontColor=#000000;fontSize=10;" parent="1" vertex="1">
+          <mxGeometry x="185" y="840" width="160" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="neo4j" value="&lt;b&gt;Neo4j 5&lt;/b&gt;&#xa;Bolt :7687, Browser :7474&#xa;16 node labels, 23 relationship types&#xa;vector index, 1024 dims, cosine" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;fillColor=#FFF2CC;strokeColor=#000000;fontColor=#000000;fontSize=10;" parent="1" vertex="1">
+          <mxGeometry x="625" y="840" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="ollama" value="&lt;b&gt;Ollama&lt;/b&gt;  on the Windows host, not in Docker&#xa;mxbai-embed-large  ·  embeddings for vector search&#xa;llama3.2  ·  optional language model for the answer" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#000000;fontColor=#000000;fontSize=10;" parent="1" vertex="1">
+          <mxGeometry x="1070" y="970" width="420" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="eClientGw" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;" parent="1" source="clientBox" target="gateway" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eClientGwL" value="HTTP :5000" style="edgeLabel;html=1;align=center;fontSize=9;fontColor=#000000;labelBackgroundColor=#ffffff;" parent="eClientGw" vertex="1" connectable="0">
+          <mxGeometry x="-0.4" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eSocGw" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;" parent="1" source="clientSoc" target="gateway" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eConsulGw" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;dashed=1;endArrow=open;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="consulBox" target="gateway" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eConsulGwL" value="which instances&#xa;are healthy?" style="edgeLabel;html=1;align=center;fontSize=9;fontColor=#000000;labelBackgroundColor=#ffffff;" parent="eConsulGw" vertex="1" connectable="0">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eRegister" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;dashed=1;endArrow=open;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.75;entryDx=0;entryDy=0;" parent="1" source="svcMerchant" target="consulBox" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="45" y="415" />
+              <mxPoint x="45" y="285" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eRegisterL" value="all six services register themselves" style="edgeLabel;html=1;align=center;fontSize=9;fontColor=#000000;labelBackgroundColor=#ffffff;" parent="eRegister" vertex="1" connectable="0">
+          <mxGeometry x="-0.2" relative="1" as="geometry">
+            <mxPoint x="90" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;" parent="1" source="gateway" target="svcMerchant" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;" parent="1" source="gateway" target="svcInvoice" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;" parent="1" source="gateway" target="svcSettlement" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;" parent="1" source="gateway" target="svcRate" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;" parent="1" source="svcMerchant" target="dbMerchant" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;" parent="1" source="svcInvoice" target="dbInvoice" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;" parent="1" source="svcSettlement" target="dbSettlement" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;" parent="1" source="svcRate" target="dbRate" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;dashed=1;endArrow=open;exitX=0.25;exitY=1;exitDx=0;exitDy=0;" parent="1" source="svcInvoice" target="svcRate" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="360" y="350" />
+              <mxPoint x="890" y="350" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e10l" value="quote (circuit breaker + cached fallback)" style="edgeLabel;html=1;align=center;fontSize=9;fontColor=#000000;labelBackgroundColor=#ffffff;" parent="e10" vertex="1" connectable="0">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;dashed=1;endArrow=open;" parent="1" source="svcInvoice" target="svcSettlement" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11l" value="settle (retry, idempotent)" style="edgeLabel;html=1;align=center;fontSize=9;fontColor=#000000;labelBackgroundColor=#ffffff;" parent="e11" vertex="1" connectable="0">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;dashed=1;endArrow=open;" parent="1" source="svcSettlement" target="webhookOut" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="760" y="340" />
+              <mxPoint x="1380" y="340" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e12l" value="backoff + dead letter" style="edgeLabel;html=1;align=center;fontSize=9;fontColor=#000000;labelBackgroundColor=#ffffff;" parent="e12" vertex="1" connectable="0">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eEvents" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;dashed=1;endArrow=open;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="svcInvoice" target="socService" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="410" y="650" />
+              <mxPoint x="265" y="650" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eEventsL" value="&lt;b&gt;security events&lt;/b&gt;: every service and the gateway publish here,&#xa;batched over HTTP, bounded queue, never a shared database" style="edgeLabel;html=1;align=center;fontSize=9;fontColor=#000000;labelBackgroundColor=#ffffff;" parent="eEvents" vertex="1" connectable="0">
+          <mxGeometry x="0.2" relative="1" as="geometry">
+            <mxPoint x="200" y="-14" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eSocDb" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;" parent="1" source="socService" target="dbSoc" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eSocDbL" value="only soc_svc may connect" style="edgeLabel;html=1;align=center;fontSize=9;fontColor=#000000;labelBackgroundColor=#ffffff;" parent="eSocDb" vertex="1" connectable="0">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="-78" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eGraphSoc" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;dashed=1;endArrow=open;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="graphService" target="socService" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eGraphSocL" value="reads events and alerts&#xa;over HTTP, on demand" style="edgeLabel;html=1;align=center;fontSize=9;fontColor=#000000;labelBackgroundColor=#ffffff;" parent="eGraphSoc" vertex="1" connectable="0">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eGraphNeo" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;endArrow=block;" parent="1" source="graphService" target="neo4j" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eGraphNeoL" value="Bolt" style="edgeLabel;html=1;align=center;fontSize=9;fontColor=#000000;labelBackgroundColor=#ffffff;" parent="eGraphNeo" vertex="1" connectable="0">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eGraphOllama" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;dashed=1;endArrow=open;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" parent="1" source="graphService" target="ollama" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1000" y="745" />
+              <mxPoint x="1000" y="1005" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eGraphOllamaL" value="host.docker.internal:11434" style="edgeLabel;html=1;align=center;fontSize=9;fontColor=#000000;labelBackgroundColor=#ffffff;" parent="eGraphOllama" vertex="1" connectable="0">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eConsulGraph" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#000000;dashed=1;endArrow=open;exitX=1;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" parent="1" source="consulBox" target="graphService" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="735" y="310" />
+              <mxPoint x="735" y="660" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eConsulGraphL" value="topology: services and health&#xa;(endpoints come from the gateway&#39;s own routing file)" style="edgeLabel;html=1;align=center;fontSize=9;fontColor=#000000;labelBackgroundColor=#ffffff;" parent="eConsulGraph" vertex="1" connectable="0">
+          <mxGeometry x="0.5" relative="1" as="geometry">
+            <mxPoint x="-10" y="-10" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="key" value="Solid arrow: request routed through the gateway, or a service writing to the store it owns.&#xa;Dashed arrow: service-to-service call, with its strategy or purpose named.&#xa;Yellow: added in Phase 2.  The security layer receives events and is never called by a payment service, so it cannot delay or block a payment." style="text;html=1;align=left;verticalAlign=middle;fontSize=9;fontStyle=2;fontColor=#000000;" parent="1" vertex="1">
+          <mxGeometry x="40" y="1060" width="1000" height="50" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ask the graph</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div class="shell">
+
+<aside class="sidebar" id="sidebar">
+  <div class="brand">
+    <div class="brand-mark">PP</div>
+    <div>
+      <div class="brand-name">Panda Pocket</div>
+      <div class="brand-sub">Crypto payment gateway</div>
+    </div>
+  </div>
+
+  <nav class="nav">
+    <div class="nav-label">Operate</div>
+    <a class="nav-item" href="/">Home<span class="nav-hint">Merchant dashboard</span></a>
+
+    <div class="nav-label">Security operations</div>
+    <a class="nav-item" href="soc.html">SOC console<span class="nav-hint">Alerts, rules and events</span></a>
+    <a class="nav-item" href="ask.html" aria-current="page">Ask the graph<span class="nav-hint">Answers with their evidence</span></a>
+  </nav>
+
+  <div class="sidebar-foot">
+    <label class="field-label" for="apikey">API key</label>
+    <input id="apikey" class="mono" spellcheck="false" autocomplete="off">
+    <button class="ghost sm" style="margin-top:9px" onclick="clearKey()">Clear key</button>
+    <div class="note" id="keyLog" style="margin-top:8px; font-size:11px"></div>
+    <div class="env"><span class="dot" id="healthDot"></span><span id="healthText">checking</span></div>
+  </div>
+</aside>
+
+<main class="main">
+  <header class="topbar">
+    <button class="hamburger ghost" onclick="PandaShell.toggleNav()" aria-label="Show navigation">
+      <span></span><span></span><span></span>
+    </button>
+    <div>
+      <h1 class="page-title">Ask the graph</h1>
+      <p class="page-sub">Retrieval-augmented answering over the knowledge graph. The evidence is gathered first and shown under every answer: retrieval decides what is true, generation only decides how to say it.</p>
+    </div>
+    <div class="topbar-actions"></div>
+  </header>
+
+  <div class="content">
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">Nodes</div>
+        <div class="stat-value" id="sNodes">-</div>
+        <div class="stat-foot">across three sources</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Relationships</div>
+        <div class="stat-value" id="sRels">-</div>
+        <div class="stat-foot">typed, not inferred</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Node labels</div>
+        <div class="stat-value" id="sLabels">-</div>
+        <div class="stat-foot">kinds of thing</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Relationship types</div>
+        <div class="stat-value" id="sTypes">-</div>
+        <div class="stat-foot">kinds of connection</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Round trip</div>
+        <div class="stat-value" id="sMs">-</div>
+        <div class="stat-foot">retrieval plus writing</div>
+      </div>
+    </div>
+
+    <div class="grid">
+
+      <div>
+        <div class="card">
+          <div class="card-head"><h2>Question</h2></div>
+          <div class="card-body">
+            <textarea id="question" spellcheck="false">Why was the critical alert raised and what should be done?</textarea>
+
+            <div class="field" style="margin-top:13px">
+              <label for="route">Retrieval route</label>
+              <select id="route">
+                <option value="">Let the retriever choose</option>
+                <option value="cypher">Cypher, exact paths</option>
+                <option value="vector">Vector, matched by meaning</option>
+                <option value="hybrid">Hybrid, meaning then traversal</option>
+              </select>
+            </div>
+
+            <button style="margin-top:15px" id="askBtn" onclick="ask()">Ask</button>
+            <button class="ghost" id="evBtn" onclick="retrieveOnly()">Evidence only, no answer</button>
+            <div id="log" style="margin-top:11px; font-size:12px; min-height:18px"></div>
+
+            <div class="section-label" style="margin-bottom:6px">Try one of these</div>
+            <div class="chips" id="presets" style="margin-top:0"></div>
+          </div>
+          <div class="card-note">
+            The first three are each won by a different route, which is why all three are
+            implemented rather than one. The first question of a session is slower: a
+            route that matches by meaning has to embed the question, and the embedding
+            model loads on first use.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Why a template writes this</h2></div>
+          <div class="card-body note">
+            The answer is assembled from the retrieved evidence by a template, not by a
+            language model. Measured on this machine, same question and same evidence:
+            the template answered in 37 ms with all three sections, the 3B model took
+            107 seconds and silently dropped the interpretation and the response. The
+            gateway would time out before it finished.
+            <br><br>
+            A template cannot hallucinate, because it has no way to produce a sentence
+            that was not assembled from retrieved facts. The model stays in the system as
+            a measured alternative, run against the graph service directly rather than
+            offered as a button here.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Same thing, from a terminal</h2></div>
+          <div class="card-body">
+            <pre class="block">curl -X POST localhost:5000/api/graph/ask \
+  -H "X-API-Key: $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"...","useModel":false}'</pre>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card" id="answerCard" style="display:none">
+          <div class="card-head">
+            <h2>Answer</h2>
+            <div class="right note mono" id="answerMeta"></div>
+          </div>
+          <div class="card-body" id="answer"></div>
+        </div>
+
+        <div class="card" id="evidenceCard" style="display:none">
+          <div class="card-head">
+            <h2>Evidence</h2>
+            <div class="right note" id="evidenceMeta"></div>
+          </div>
+          <div class="card-body" id="evidence"></div>
+        </div>
+
+        <div class="card" id="emptyCard">
+          <div class="card-head"><h2>Nothing asked yet</h2></div>
+          <div class="card-body note">
+            Every answer comes back in three parts: what was observed, what it might
+            mean, and what to do about it. They are kept apart on purpose. The events are
+            facts, the threat is a hypothesis, and somebody suspending a real merchant's
+            payouts needs to know which is which.
+            <br><br>
+            Underneath each answer is everything that was retrieved to produce it: the
+            nodes with how closely they matched, the relationships walked, the passages
+            quoted with their document and revision, and the query that ran.
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+</main>
+
+</div>
+
+<script src="app.js"></script>
+<script>
+const API = '';
+const DEMO_KEY = 'pk_live_demo0000000000000000000000000000000000';
+
+function getKey() {
+  try { return localStorage.getItem('pp_api_key') ?? DEMO_KEY; } catch { return DEMO_KEY; }
+}
+function setKey(v) { try { localStorage.setItem('pp_api_key', v); } catch { /* not fatal */ } }
+
+function clearKey() {
+  document.getElementById('apikey').value = '';
+  setKey('');
+  document.getElementById('keyLog').innerHTML =
+    '<span class="note">Key cleared. The next question will be rejected with 401.</span>';
+}
+
+function authHeaders(extra = {}) {
+  const key = document.getElementById('apikey').value.trim();
+  return key ? { ...extra, 'X-API-Key': key } : extra;
+}
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const log = (msg, cls = 'note') =>
+  document.getElementById('log').innerHTML = '<span class="' + cls + '">' + esc(msg) + '</span>';
+
+const pct = v => v === null || v === undefined ? '' : (v * 100).toFixed(0) + '%';
+
+// Taken from the evaluation gold set, so what the page demonstrates is what the
+// measurements in the report were taken against.
+const PRESETS = [
+  'What is the impact if the rate service fails?',
+  'How do I tell whether someone actually got in?',
+  'Someone changed where our money gets sent. What now?',
+  'Why was the critical alert raised and what should be done?',
+  'What controls mitigate credential attacks?',
+  'Which merchants are linked to high severity alerts?',
+  'What threats target the merchant service?'
+];
+
+document.getElementById('presets').innerHTML = PRESETS
+  .map((q, i) => `<button type="button" class="chip" onclick="usePreset(${i})">${esc(q)}</button>`).join('');
+
+function usePreset(i) {
+  document.getElementById('question').value = PRESETS[i];
+  ask();
+}
+
+function busy(on) {
+  document.getElementById('askBtn').disabled = on;
+  document.getElementById('evBtn').disabled = on;
+}
+
+async function post(path, body) {
+  const res = await fetch(API + path, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+  return res.json();
+}
+
+function request() {
+  const question = document.getElementById('question').value.trim();
+  const route = document.getElementById('route').value;
+  return { question, route: route || null };
+}
+
+// ---------------------------------------------------------------------------
+// Ask: retrieve, then generate
+// ---------------------------------------------------------------------------
+async function ask() {
+  const { question, route } = request();
+  if (!question) { log('Type a question first.', 'err'); return; }
+
+  busy(true);
+  log('retrieving evidence and writing the answer');
+  document.getElementById('emptyCard').style.display = 'none';
+
+  try {
+    // useModel is deliberately false rather than absent: the graph service's
+    // own default can be configured on, and a model answer would outlive the
+    // gateway's timeout.
+    const started = performance.now();
+    const a = await post('/api/graph/ask', { question, route, useModel: false });
+    const roundTrip = Math.round(performance.now() - started);
+
+    document.getElementById('sMs').textContent = roundTrip + ' ms';
+
+    const card = document.getElementById('answerCard');
+    card.style.display = '';
+
+    document.getElementById('answerMeta').innerHTML =
+      `${esc(a.evidence.route)} &middot; ${esc(a.generator)} &middot; ${roundTrip} ms round trip, ` +
+      `of which ${a.generationMs < 1 ? 'under 1' : a.generationMs} ms writing` +
+      (a.evidence.topSimilarity !== null && a.evidence.topSimilarity !== undefined
+        ? ' &middot; closest match ' + pct(a.evidence.topSimilarity) : '');
+
+    document.getElementById('answer').innerHTML = `
+      <div class="section-label" style="margin-top:0">Observed</div>
+      <div class="lede">${esc(a.observed)}</div>
+
+      <div class="section-label">Interpretation</div>
+      <div class="lede">${esc(a.interpretation)}</div>
+
+      <div class="section-label">Response</div>
+      <div class="lede">${esc(a.response)}</div>`;
+
+    renderEvidence(a.evidence);
+    log('answered from ' + a.evidence.nodes.length + ' nodes and ' +
+        a.evidence.sources.length + ' source passages', 'ok');
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {
+    const hint = e.message.startsWith('401') ? '. The API key is missing or not valid.' : '';
+    log('Could not answer: ' + e.message + hint, 'err');
+  } finally {
+    busy(false);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Evidence without prose. Useful for showing what retrieval found on its own,
+// which is the half of RAG that decides whether an answer is true.
+// ---------------------------------------------------------------------------
+async function retrieveOnly() {
+  const { question, route } = request();
+  if (!question) { log('Type a question first.', 'err'); return; }
+
+  busy(true);
+  log('retrieving');
+  document.getElementById('emptyCard').style.display = 'none';
+  document.getElementById('answerCard').style.display = 'none';
+
+  try {
+    const envelope = await post('/api/graph/retrieve', { question, route });
+    renderEvidence(envelope);
+    log('retrieved without generating anything', 'ok');
+  } catch (e) {
+    log('Could not retrieve: ' + e.message, 'err');
+  } finally {
+    busy(false);
+  }
+}
+
+function renderEvidence(ev) {
+  const card = document.getElementById('evidenceCard');
+  card.style.display = '';
+
+  const section = (title, html) =>
+    `<div class="section-label">${esc(title)}</div>${html}`;
+
+  const nodes = ev.nodes.length ? `
+    <table>
+      <thead><tr><th>Label</th><th>Id</th><th>Summary</th><th>Score</th></tr></thead>
+      <tbody>${ev.nodes.map(n => `
+        <tr>
+          <td class="mono nowrap">${esc(n.label)}</td>
+          <td class="mono nowrap">${esc(n.id)}</td>
+          <td>${esc(n.summary)}</td>
+          <td class="mono">${n.score === null || n.score === undefined ? '' : pct(n.score)}</td>
+        </tr>`).join('')}</tbody>
+    </table>` : '<span class="note">none</span>';
+
+  const edges = ev.edges.length
+    ? '<pre class="block">' + ev.edges
+        .map(e => esc(e.from) + '  -[' + esc(e.type) + ']->  ' + esc(e.to)).join('\n') + '</pre>'
+    : '<span class="note">none</span>';
+
+  const sources = ev.sources.length ? ev.sources.map(s => `
+    <div style="margin-bottom:12px">
+      <div class="mono note">${esc(s.procedureId)} &middot; ${esc(s.title)} &middot;
+        revision ${s.revision} &middot; paragraph ${s.ordinal}${
+        s.similarity === null || s.similarity === undefined ? '' : ' &middot; ' + pct(s.similarity) + ' match'}</div>
+      <div style="margin-top:4px">${esc(s.text)}</div>
+    </div>`).join('') : '<span class="note">none</span>';
+
+  const cypher = ev.cypherQueries.length
+    ? '<pre class="block">' + ev.cypherQueries.map(q => esc(q.trim())).join('\n\n') + '</pre>'
+    : '<span class="note">none, this route did not query by pattern</span>';
+
+  document.getElementById('evidenceMeta').innerHTML =
+    `<span class="mono">${esc(ev.route)} &middot; ${ev.nodes.length} nodes &middot; ` +
+    `${ev.edges.length} relationships &middot; ${ev.sources.length} passages</span>`;
+
+  document.getElementById('evidence').innerHTML = `
+    <div class="lede">${esc(ev.retrievalExplanation)}</div>
+    ${section('Nodes retrieved', nodes)}
+    ${section('Relationships walked', edges)}
+    ${section('Source passages, with document and revision', sources)}
+    ${section('Cypher that ran', cypher)}
+    <div class="note" style="margin-top:14px">
+      Every identifier above exists in the graph. An answer whose evidence
+      cannot be inspected is an assertion, and a fabricated reference is the one
+      error that cannot be caught by reading the prose, because it looks exactly
+      like a real one.
+    </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// What the graph currently holds
+// ---------------------------------------------------------------------------
+async function loadStats() {
+  try {
+    let res = await fetch(API + '/api/graph/stats', { headers: authHeaders() });
+
+    // See the note in soc.html: a 503 here is the key validator warming up,
+    // not a verdict on the key.
+    if (res.status === 503) {
+      await new Promise(r => setTimeout(r, 1200));
+      res = await fetch(API + '/api/graph/stats', { headers: authHeaders() });
+    }
+
+    if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+    const s = await res.json();
+    document.getElementById('sNodes').textContent = s.totalNodes;
+    document.getElementById('sRels').textContent = s.totalRelationships;
+    document.getElementById('sLabels').textContent = s.nodesByLabel.length;
+    document.getElementById('sTypes').textContent = s.relationshipsByType.length;
+  } catch (e) {
+    log('Could not read the graph size: ' + e.message, 'err');
+  }
+}
+
+document.getElementById('apikey').value = getKey();
+document.getElementById('apikey').addEventListener('change', e => setKey(e.target.value.trim()));
+
+loadStats();
+</script>
+
+</body>
+</html>

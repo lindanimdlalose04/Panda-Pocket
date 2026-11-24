@@ -121,14 +121,32 @@ public sealed class ApiKeyAuthenticationMiddleware(
             return;
         }
 
-        var identity = await ResolveAsync(apiKey, correlationId, context.RequestAborted);
+        var check = await ResolveAsync(apiKey, correlationId, context.RequestAborted);
 
-        if (identity is null)
+        // "The key is wrong" and "I could not find out" are different answers,
+        // and collapsing them was a real defect rather than a tidiness
+        // complaint. Every failure used to answer 401 invalid_key and publish
+        // an API_KEY_INVALID event, so a slow Merchant service produced a burst
+        // of credential-failure evidence from whoever happened to be using the
+        // system. Rule R1 raises a HIGH credential-probing alert on five of
+        // those from one address in five minutes: an outage could manufacture
+        // an attack. Observed here after a host restart, when three concurrent
+        // requests waited 12.7 seconds for a cold Merchant service and were all
+        // reported as invalid keys.
+        if (check.Unavailable)
+        {
+            await UnavailableAsync(context, correlationId);
+            return;
+        }
+
+        if (check.Identity is null)
         {
             await RejectAsync(context, correlationId, "invalid_key",
                 "The API key is not valid.");
             return;
         }
+
+        var identity = check.Identity;
 
         // Now the header can be trusted downstream, because only this line sets it.
         context.Request.Headers[CorrelationHeaders.MerchantId] = identity.MerchantId.ToString();
@@ -141,7 +159,18 @@ public sealed class ApiKeyAuthenticationMiddleware(
         AnonymousPaths.Any(p => path.StartsWithSegments(p, StringComparison.OrdinalIgnoreCase))
         || path == "/" || !path.HasValue;
 
-    private async Task<MerchantIdentity?> ResolveAsync(string apiKey, string correlationId, CancellationToken ct)
+    /// <summary>
+    /// The three possible answers, kept apart. Valid, definitely not valid, and
+    /// could not be established.
+    /// </summary>
+    private readonly record struct KeyCheck(MerchantIdentity? Identity, bool Unavailable)
+    {
+        public static KeyCheck Valid(MerchantIdentity identity) => new(identity, false);
+        public static readonly KeyCheck Invalid = new(null, false);
+        public static readonly KeyCheck CannotTell = new(null, true);
+    }
+
+    private async Task<KeyCheck> ResolveAsync(string apiKey, string correlationId, CancellationToken ct)
     {
         // Keyed by the key itself, which never leaves this process. Caching by
         // hash would be no safer and would cost a hash per request.
@@ -149,7 +178,7 @@ public sealed class ApiKeyAuthenticationMiddleware(
 
         if (cache.TryGetValue<MerchantIdentity>(cacheKey, out var cached) && cached is not null)
         {
-            return cached;
+            return KeyCheck.Valid(cached);
         }
 
         try
@@ -163,12 +192,23 @@ public sealed class ApiKeyAuthenticationMiddleware(
             request.Headers.Add(CorrelationHeaders.CorrelationId, correlationId);
 
             using var response = await client.SendAsync(request, ct);
-            if (!response.IsSuccessStatusCode) return null;
+
+            // A 5xx from the validator is the validator failing, not a verdict
+            // on the key. Only a successful response carries a verdict.
+            if ((int)response.StatusCode >= 500)
+            {
+                logger.LogError(
+                    "Merchant service answered {Status} while validating a key; refusing without judging the key",
+                    (int)response.StatusCode);
+                return KeyCheck.CannotTell;
+            }
+
+            if (!response.IsSuccessStatusCode) return KeyCheck.Invalid;
 
             var result = await response.Content.ReadFromJsonAsync<ValidateKeyResult>(
                 new JsonSerializerOptions(JsonSerializerDefaults.Web), ct);
 
-            if (result is null || !result.Valid || result.MerchantId is null) return null;
+            if (result is null || !result.Valid || result.MerchantId is null) return KeyCheck.Invalid;
 
             var identity = new MerchantIdentity(
                 result.MerchantId.Value, result.BusinessName ?? "unknown", result.FeePercent ?? 0m);
@@ -177,7 +217,7 @@ public sealed class ApiKeyAuthenticationMiddleware(
             // attacker probe cheaply and would make a newly issued key appear
             // broken for the length of the window.
             cache.Set(cacheKey, identity, CacheDuration);
-            return identity;
+            return KeyCheck.Valid(identity);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
@@ -186,7 +226,7 @@ public sealed class ApiKeyAuthenticationMiddleware(
             // outage in one service silently removed authentication from the
             // entire system.
             logger.LogError(ex, "Merchant service unreachable during key validation");
-            return null;
+            return KeyCheck.CannotTell;
         }
     }
 
@@ -223,6 +263,32 @@ public sealed class ApiKeyAuthenticationMiddleware(
             title = "Unauthorized",
             status = 401,
             detail,
+            correlationId
+        });
+    }
+
+    /// <summary>
+    /// Refuses the request without accusing the caller.
+    ///
+    /// 503 rather than 401, because nothing is known about the key, and no SOC
+    /// event, because this is an outage rather than a credential failure. The
+    /// outage has its own detector: Consul's health checks feed
+    /// SERVICE_HEALTH_CHANGED and rule R3, which is the honest place for it.
+    /// Publishing a credential event here would put false evidence in front of
+    /// the rule that looks for credential attacks.
+    /// </summary>
+    private static async Task UnavailableAsync(HttpContext context, string correlationId)
+    {
+        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        context.Response.ContentType = "application/problem+json";
+
+        await context.Response.WriteAsJsonAsync(new
+        {
+            type = "https://tools.ietf.org/html/rfc9110#section-15.6.4",
+            title = "Service unavailable",
+            status = 503,
+            detail = "The API key could not be validated because the Merchant service did not answer. " +
+                     "The key has not been judged; retry shortly.",
             correlationId
         });
     }

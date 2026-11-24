@@ -1,4 +1,4 @@
-# Panda Pocket: build the six service images from the published output.
+﻿# Panda Pocket: build the six service images from the published output.
 #
 # Step two of two. Run .\infra\publish-local.ps1 first.
 #
@@ -18,6 +18,7 @@ $docker = "C:\Program Files\Docker\Docker\resources\bin\docker.exe"
 
 $services = @(
     'soc-service',
+    'graph-service',
     'gateway',
     'merchant-service',
     'rate-service',
@@ -27,7 +28,7 @@ $services = @(
 
 Push-Location $root
 try {
-    foreach ($name in @('soc','gateway','merchant','invoice','rate','settlement')) {
+    foreach ($name in @('soc','graph','gateway','merchant','invoice','rate','settlement')) {
         if (-not (Test-Path (Join-Path '.artifacts' $name))) {
             Write-Host ""
             Write-Host "  .artifacts\$name is missing. Run .\infra\publish-local.ps1 first." -ForegroundColor Red
@@ -36,7 +37,7 @@ try {
     }
 
     Write-Host ""
-    Write-Host "Building six images, one at a time" -ForegroundColor Cyan
+    Write-Host "Building images, one at a time" -ForegroundColor Cyan
     Write-Host ""
 
     $failed = @()
@@ -74,3 +75,4 @@ try {
 finally {
     Pop-Location
 }
+

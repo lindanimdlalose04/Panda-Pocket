@@ -11,6 +11,7 @@ public sealed class SettlementService(
     SettlementDbContext db,
     IMerchantClient merchantClient,
     ISocEventPublisher soc,
+    ReconcileStateLog reconcileState,
     ILogger<SettlementService> logger)
 {
     public async Task<(SettlementResponse? Result, string? Error, bool AlreadySettled)> SettleAsync(
@@ -55,13 +56,44 @@ public sealed class SettlementService(
         var net = gross - fee;
 
         var now = DateTime.UtcNow;
-        var balance = await db.MerchantBalances.FirstOrDefaultAsync(b => b.MerchantId == request.MerchantId, ct);
 
-        if (balance is null)
-        {
-            balance = new MerchantBalance { MerchantId = request.MerchantId, UpdatedAt = now };
-            db.MerchantBalances.Add(balance);
-        }
+        // From here to the commit runs in one transaction with the balance row
+        // locked.
+        //
+        // WHY: the balance used to be read, changed in memory and written back.
+        // Two settlements for the same merchant arriving together both read the
+        // same figure, both added their own amount to it, and the second write
+        // overwrote the first. The ledger kept both sets of entries, because
+        // they belong to different invoices and nothing objected, so the books
+        // silently disagreed with the balance by exactly one settlement.
+        //
+        // That is a lost update, and it happened: on 6 September two invoices
+        // settled a second apart and R247.50 vanished from the stored balance
+        // while staying in the ledger. The reconciliation check caught it and
+        // raised RECONCILE_MISMATCH, which is the reason that check exists.
+        //
+        // The idempotency guard at the top of this method does not help. It
+        // stops the SAME invoice settling twice; this was two DIFFERENT invoices
+        // racing each other.
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
+        // The row has to exist before it can be locked. SELECT FOR UPDATE locks
+        // rows that are present and has nothing to lock for a merchant who has
+        // never been credited, which would leave two concurrent first
+        // settlements racing to insert instead.
+        await db.Database.ExecuteSqlRawAsync(
+            "INSERT INTO merchant_balances " +
+            "(merchant_id, available_zar, lifetime_credited_zar, lifetime_fees_zar, updated_at) " +
+            "VALUES ({0}, 0, 0, 0, {1}) ON CONFLICT (merchant_id) DO NOTHING",
+            [request.MerchantId, now], ct);
+
+        // FOR UPDATE holds the row until this transaction commits. A concurrent
+        // settlement for the same merchant waits here rather than reading a
+        // figure that is about to be stale. The lock is per row, so merchants
+        // never block one another.
+        var balance = await db.MerchantBalances
+            .FromSqlRaw("SELECT * FROM merchant_balances WHERE merchant_id = {0} FOR UPDATE", request.MerchantId)
+            .FirstAsync(ct);
 
         // Two entries, not one net entry. The merchant is credited the full
         // amount the customer paid and charged the commission separately,
@@ -122,9 +154,12 @@ public sealed class SettlementService(
         try
         {
             await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
         }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
+            await transaction.RollbackAsync(ct);
+
             // Two settlement calls raced and both passed the check above. The
             // unique index on (invoice_id, entry_type) is the real guard; this
             // is the losing thread discovering it lost, which is a correct
@@ -205,7 +240,23 @@ public sealed class SettlementService(
 
         var matches = stored == recomputed;
 
-        if (!matches)
+        if (matches)
+        {
+            // Nothing to publish, but the merchant stops being tracked so that
+            // a gap appearing later is reported as new rather than suppressed
+            // as a repeat of an older one.
+            reconcileState.Clear(merchantId);
+            return (stored, recomputed, matches);
+        }
+
+        // Published on a change, not on an observation.
+        //
+        // This check runs on every read of the balance and the dashboard polls
+        // that read, so a merchant with a standing gap produced one CRITICAL
+        // event every few seconds for as long as the page was open. The finding
+        // was correct and the volume made it useless: several hundred copies of
+        // one fact, burying everything else in the evidence store.
+        if (reconcileState.ShouldReport(merchantId, stored - recomputed))
         {
             // The event type was a bare "LEDGER_MISMATCH" string here, which is
             // the precise drift the catalogue exists to stop: a type no rule

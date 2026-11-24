@@ -62,6 +62,25 @@ public sealed class ConsulRegistrationService(
             }
         };
 
+        // Clear this instance's predecessors before announcing a successor.
+        //
+        // Every instance registers at its service NAME, not at a container IP,
+        // which is what lets the gateway reach it inside Compose. The side
+        // effect is that a dead instance's health check keeps passing, because
+        // the name now resolves to its replacement. Nothing ever goes critical,
+        // so DeregisterCriticalServiceAfter never fires and a ghost registration
+        // survives for ever. Three restarts of one container left three
+        // instances in the catalogue, all reporting healthy, all the same
+        // process.
+        //
+        // The proper fix is to register the container's real address, which
+        // would make instance identity genuine. That changes how every service
+        // is reached, so it is not a change to make days before a deadline. This
+        // is the contained version: on startup, remove the entries that can only
+        // be previous lives of this same instance, meaning same service name and
+        // same address but a different id. Routing is untouched.
+        await DeregisterStaleInstancesAsync(cancellationToken);
+
         // Retried, because Consul and the service start at the same time and
         // whichever wins the race is not something either can control.
         var delay = TimeSpan.FromSeconds(2);
@@ -101,6 +120,48 @@ public sealed class ConsulRegistrationService(
             }
         }
     }
+
+    /// <summary>
+    /// Removes registrations that share this instance's service name and
+    /// address but not its id. Best effort: a registry that cannot be read is
+    /// not a reason to refuse to start.
+    /// </summary>
+    private async Task DeregisterStaleInstancesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var client = httpClientFactory.CreateClient("consul");
+
+            var registered = await client.GetFromJsonAsync<Dictionary<string, ConsulRegisteredService>>(
+                "/v1/agent/services", cancellationToken);
+
+            if (registered is null) return;
+
+            var stale = registered.Values
+                .Where(r => r.Service == _options.ServiceName
+                            && r.Address == _options.ServiceAddress
+                            && r.ID != _instanceId)
+                .ToList();
+
+            foreach (var ghost in stale)
+            {
+                await client.PutAsync($"/v1/agent/service/deregister/{ghost.ID}", null, cancellationToken);
+                logger.LogInformation("Deregistered stale instance {InstanceId}", ghost.ID);
+            }
+
+            if (stale.Count > 0)
+            {
+                logger.LogInformation(
+                    "Cleared {Count} stale registration(s) for {ServiceName}", stale.Count, _options.ServiceName);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("Could not clear stale registrations ({Reason}); continuing", ex.Message);
+        }
+    }
+
+    private sealed record ConsulRegisteredService(string ID, string Service, string Address, int Port);
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {

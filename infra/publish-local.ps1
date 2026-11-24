@@ -1,4 +1,4 @@
-# Panda Pocket: publish every service on the host, ready for the fast image build.
+﻿# Panda Pocket: publish every service on the host, ready for the fast image build.
 #
 # Step one of two on a memory-constrained machine:
 #
@@ -21,6 +21,7 @@ $root = Split-Path $PSScriptRoot -Parent
 
 $projects = [ordered]@{
     soc        = 'src\Services\Soc.Api\PandaPocket.Services.Soc.csproj'
+    graph      = 'src\Services\Graph.Api\PandaPocket.Services.Graph.csproj'
     gateway    = 'src\Gateway\PandaPocket.Gateway.csproj'
     merchant   = 'src\Services\Merchant.Api\PandaPocket.Services.Merchant.csproj'
     invoice    = 'src\Services\Invoice.Api\PandaPocket.Services.Invoice.csproj'
@@ -31,7 +32,7 @@ $projects = [ordered]@{
 Push-Location $root
 try {
     Write-Host ""
-    Write-Host "Publishing six services to .artifacts" -ForegroundColor Cyan
+    Write-Host "Publishing every service to .artifacts" -ForegroundColor Cyan
     Write-Host ""
 
     $failed = @()
@@ -73,3 +74,4 @@ try {
 finally {
     Pop-Location
 }
+

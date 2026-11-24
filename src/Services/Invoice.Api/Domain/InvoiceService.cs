@@ -100,13 +100,14 @@ public sealed class InvoiceService(
 
         LogSoc(SocEventType.InvoiceCreated, SocSeverity.Info, correlationId, merchantId, invoice.Id, new()
         {
+            ["reference"] = reference,
             ["amountZar"] = amountZar,
             ["asset"] = invoice.Asset,
             ["lockedRate"] = invoice.LockedRate,
             ["cryptoAmount"] = invoice.CryptoAmount,
             ["rateWasFallback"] = rate.IsFallback,
             ["rateStalenessSeconds"] = Math.Round(rate.Staleness.TotalSeconds, 1)
-        });
+        }, reference);
 
         return InvoiceResult.Ok(invoice);
     }
@@ -228,7 +229,7 @@ public sealed class InvoiceService(
             {
                 ["txHash"] = txHash,
                 ["amountCrypto"] = amountCrypto
-            });
+            }, invoice.Reference);
 
             return InvoiceResult.Fail(InvoiceOutcome.DuplicateTransaction,
                 $"Transaction '{txHash}' has already been recorded.", invoice);
@@ -240,7 +241,7 @@ public sealed class InvoiceService(
             {
                 ["txHash"] = txHash,
                 ["totalReceived"] = totalReceived
-            });
+            }, invoice.Reference);
 
             return InvoiceResult.Ok(invoice);
         }
@@ -251,7 +252,7 @@ public sealed class InvoiceService(
             ["expected"] = invoice.CryptoAmount,
             ["received"] = totalReceived,
             ["shortfall"] = invoice.CryptoAmount - totalReceived
-        });
+        }, invoice.Reference);
 
         return InvoiceResult.Fail(InvoiceOutcome.Underpaid,
             $"Received {totalReceived} of {invoice.CryptoAmount} {invoice.Asset}. The invoice can still be topped up until it expires.",
@@ -373,7 +374,8 @@ public sealed class InvoiceService(
     /// aggregate across it. Call sites need to know about neither.
     /// </summary>
     private void LogSoc(string eventType, string severity, string correlationId,
-        Guid? merchantId, Guid? invoiceId, Dictionary<string, object?> metadata)
+        Guid? merchantId, Guid? invoiceId, Dictionary<string, object?> metadata,
+        string? reference = null)
     {
         soc.Publish(new SocEvent
         {
@@ -382,7 +384,13 @@ public sealed class InvoiceService(
             CorrelationId = correlationId,
             UserId = merchantId,
             AffectedEntity = invoiceId is { } id ? SocEntity.Ref(SocEntity.Invoice, id) : null,
-            Message = MessageFor(eventType),
+            // The merchant's own reference travels in the sentence, not only in
+            // the metadata, because the message is the field the graph loader
+            // stores on an Event node. Without it the word a shop uses for an
+            // order ("matcha") exists only in invoice_db, and an analyst tracing
+            // a disputed payment in the graph has an invoice id and nothing a
+            // human recognises.
+            Message = reference is null ? MessageFor(eventType) : $"{MessageFor(eventType)} [{reference}]",
             Metadata = metadata
         });
     }

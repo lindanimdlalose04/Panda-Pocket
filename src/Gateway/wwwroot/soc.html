@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SOC console</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div class="shell">
+
+<aside class="sidebar" id="sidebar">
+  <div class="brand">
+    <div class="brand-mark">PP</div>
+    <div>
+      <div class="brand-name">Panda Pocket</div>
+      <div class="brand-sub">Crypto payment gateway</div>
+    </div>
+  </div>
+
+  <nav class="nav">
+    <div class="nav-label">Operate</div>
+    <a class="nav-item" href="/">Home<span class="nav-hint">Merchant dashboard</span></a>
+
+    <div class="nav-label">Security operations</div>
+    <a class="nav-item" href="soc.html" aria-current="page">SOC console<span class="nav-hint">Alerts, rules and events</span></a>
+    <a class="nav-item" href="ask.html">Ask the graph<span class="nav-hint">Answers with their evidence</span></a>
+  </nav>
+
+  <div class="sidebar-foot">
+    <label class="field-label" for="apikey">API key</label>
+    <input id="apikey" class="mono" spellcheck="false" autocomplete="off">
+    <button class="ghost sm" style="margin-top:9px" onclick="clearKey()">Clear key</button>
+    <div class="note" id="keyLog" style="margin-top:8px; font-size:11px"></div>
+    <div class="env"><span class="dot" id="healthDot"></span><span id="healthText">checking</span></div>
+  </div>
+</aside>
+
+<main class="main">
+  <header class="topbar">
+    <button class="hamburger ghost" onclick="PandaShell.toggleNav()" aria-label="Show navigation">
+      <span></span><span></span><span></span>
+    </button>
+    <div>
+      <h1 class="page-title">SOC console</h1>
+      <p class="page-sub">Alerts raised by the detection engine, each one traceable to the events that caused it and the rule that connected them.</p>
+    </div>
+    <div class="topbar-actions"><span class="note mono" id="lastLoad"></span></div>
+  </header>
+
+  <div class="content">
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">Events stored</div>
+        <div class="stat-value" id="sEvents">-</div>
+        <div class="stat-foot">collected from every service</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Alerts</div>
+        <div class="stat-value" id="sAlerts">-</div>
+        <div class="stat-foot">raised by the rule engine</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Open</div>
+        <div class="stat-value" id="sOpen">-</div>
+        <div class="stat-foot">not yet acknowledged</div>
+      </div>
+      <div class="stat alarm">
+        <div class="stat-label">Critical or high</div>
+        <div class="stat-value" id="sBad">-</div>
+        <div class="stat-foot">worth looking at first</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Rules armed</div>
+        <div class="stat-value" id="sRules">-</div>
+        <div class="stat-foot">evaluated every 20 seconds</div>
+      </div>
+    </div>
+
+    <div class="grid">
+
+      <div>
+        <div class="card">
+          <div class="card-head"><h2>Filters</h2></div>
+          <div class="card-body">
+            <div class="field">
+              <label for="fSeverity">Severity</label>
+              <select id="fSeverity" onchange="loadAlerts()">
+                <option value="">Any severity</option>
+                <option value="CRITICAL">Critical</option>
+                <option value="HIGH">High</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="LOW">Low</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="fStatus">Status</label>
+              <select id="fStatus" onchange="loadAlerts()">
+                <option value="">Any status</option>
+                <option value="OPEN">Open</option>
+                <option value="ACKNOWLEDGED">Acknowledged</option>
+                <option value="CLOSED">Closed</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="fRule">Rule</label>
+              <select id="fRule" onchange="loadAlerts()">
+                <option value="">Any rule</option>
+              </select>
+            </div>
+
+            <label class="check">
+              <input type="checkbox" id="auto" checked>
+              <span>Refresh every 10 seconds</span>
+            </label>
+          </div>
+          <div class="card-note">
+            The rule engine evaluates on a timer, so an alert can lag what caused it by
+            up to twenty seconds.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Same thing, from a terminal</h2></div>
+          <div class="card-body">
+            <div class="note">Everything on this page is a plain HTTP call:</div>
+            <pre class="block">curl -H "X-API-Key: $KEY" \
+  localhost:5000/api/soc/alerts
+
+curl -H "X-API-Key: $KEY" \
+  localhost:5000/api/soc/alerts/{id}</pre>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="card-head">
+            <h2>Alerts</h2>
+            <div class="right"><button class="ghost sm" onclick="refreshAll()">Refresh now</button></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Severity</th><th>Rule</th><th>What was detected</th>
+                  <th>First seen</th><th>Last seen</th><th>Events</th><th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="alertRows">
+                <tr><td colspan="7" class="note">loading</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="card-note">
+            One attack raises one alert. While it continues the same alert is updated:
+            the event count rises and the last seen time moves, so the first seen time
+            still says when it started. Select a row to see the rule and the events behind it.
+          </div>
+        </div>
+
+        <div class="card" id="detailCard" style="display:none">
+          <div class="card-head">
+            <h2>Alert detail</h2>
+            <div class="right"><button class="ghost sm" onclick="hideDetail()">Close</button></div>
+          </div>
+          <div class="card-body" id="detail"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Latest events</h2>
+            <div class="right note">newest fifteen</div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Time</th><th>Type</th><th>Severity</th><th>Service</th><th>Source</th><th>Message</th></tr>
+              </thead>
+              <tbody id="eventRows">
+                <tr><td colspan="6" class="note">loading</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="card-note">
+            Raw collected events. Most of these are ordinary on their own. A rule is what
+            turns a count of ordinary events into a finding.
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+</main>
+
+</div>
+
+<script src="app.js"></script>
+<script>
+// Same origin: the gateway serves this page and routes the API, so there is no
+// CORS to configure and no host to hard-code.
+const API = '';
+
+// The seeded demo key, matching index.html, so the page works from a clean
+// clone with nothing to configure.
+const DEMO_KEY = 'pk_live_demo0000000000000000000000000000000000';
+
+// localStorage can throw in a private window or with site data blocked, so
+// every access is guarded and falls back rather than breaking the page.
+function getKey() {
+  try { return localStorage.getItem('pp_api_key') ?? DEMO_KEY; } catch { return DEMO_KEY; }
+}
+function setKey(v) { try { localStorage.setItem('pp_api_key', v); } catch { /* not fatal */ } }
+
+function clearKey() {
+  document.getElementById('apikey').value = '';
+  setKey('');
+  note('keyLog', 'Key cleared. The next refresh will be rejected by the gateway with 401.', 'note');
+}
+
+function authHeaders(extra = {}) {
+  const key = document.getElementById('apikey').value.trim();
+  return key ? { ...extra, 'X-API-Key': key } : extra;
+}
+
+// Everything rendered below comes from the database, so it is escaped rather
+// than trusted. An event message containing a tag must not become one.
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const note = (id, msg, cls = 'note') =>
+  document.getElementById(id).innerHTML = '<span class="' + cls + '">' + esc(msg) + '</span>';
+
+const sevPill = s => `<span class="pill sev-${esc(s)}">${esc(s)}</span>`;
+const stPill  = s => `<span class="pill st-${esc(s)}">${esc(s)}</span>`;
+
+// The API returns UTC without a zone marker, so one is added before parsing.
+// Without it the browser reads the timestamp as local and every alert appears
+// two hours out in South Africa.
+const utc = t => new Date(String(t).endsWith('Z') ? t : t + 'Z');
+
+// A date is shown as soon as the timestamp is not today's. Time alone made an
+// alert from last night read as one from this afternoon, which is the sort of
+// quiet wrongness this whole layer exists to avoid.
+const time = t => {
+  const d = utc(t);
+  const clock = d.toLocaleTimeString('en-ZA', { hour12: false });
+  return d.toDateString() === new Date().toDateString()
+    ? clock
+    : d.toLocaleDateString('en-ZA', { day: '2-digit', month: 'short' }) + ' ' + clock;
+};
+const dateTime = t => utc(t).toLocaleString('en-ZA', { hour12: false });
+
+// One place that reports a failed call, so a 401 reads as a 401 everywhere.
+async function get(path, retry = true) {
+  const res = await fetch(API + path, { headers: authHeaders() });
+
+  // 503 means the gateway could not reach the Merchant service to validate the
+  // key, which happens for a few seconds after a cold start while every panel
+  // on this page asks at once. One retry rides that out; anything else is
+  // reported rather than hidden.
+  if (res.status === 503 && retry) {
+    await new Promise(r => setTimeout(r, 1200));
+    return get(path, false);
+  }
+
+  if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+  return res.json();
+}
+
+let selectedId = null;
+let lastSignature = null;
+
+// ---------------------------------------------------------------------------
+// Alerts
+// ---------------------------------------------------------------------------
+async function loadAlerts() {
+  const params = new URLSearchParams({ pageSize: '200' });
+  const sev = document.getElementById('fSeverity').value;
+  const st  = document.getElementById('fStatus').value;
+  const rule = document.getElementById('fRule').value;
+  if (sev)  params.set('severity', sev);
+  if (st)   params.set('status', st);
+  if (rule) params.set('ruleId', rule);
+
+  const body = document.getElementById('alertRows');
+
+  try {
+    const page = await get('/api/soc/alerts?' + params);
+
+    // Counted here rather than server side. At demo scale there are a handful
+    // of alerts and pageSize 200 holds them all; a real deployment would want a
+    // counts endpoint rather than paging the lot to add them up.
+    document.getElementById('sAlerts').textContent = page.totalCount;
+    document.getElementById('sOpen').textContent =
+      page.items.filter(a => a.status === 'OPEN').length;
+    document.getElementById('sBad').textContent =
+      page.items.filter(a => a.severity === 'CRITICAL' || a.severity === 'HIGH').length;
+
+    if (!page.items.length) {
+      lastSignature = null;
+      body.innerHTML = '<tr><td colspan="7" class="note">No alerts match. Run ' +
+        'infra\\simulate-attacks.ps1 and they appear within about 20 seconds, which is ' +
+        'how often the rule engine evaluates.</td></tr>';
+      return;
+    }
+
+    const signature = JSON.stringify(page.items
+      .map(a => [a.alertId, a.status, a.eventCount, a.lastSeenAt, a.alertId === selectedId]));
+    if (signature === lastSignature) return;
+    lastSignature = signature;
+
+    body.innerHTML = page.items.map(a => `
+      <tr class="clickable ${a.alertId === selectedId ? 'selected' : ''}" onclick="openAlert('${a.alertId}')">
+        <td>${sevPill(a.severity)}</td>
+        <td class="mono nowrap">${esc(a.ruleId)}</td>
+        <td>${esc(a.description)}</td>
+        <td class="mono nowrap">${time(a.firstSeenAt)}</td>
+        <td class="mono nowrap">${time(a.lastSeenAt)}</td>
+        <td class="mono">${a.eventCount}</td>
+        <td>${stPill(a.status)}</td>
+      </tr>`).join('');
+  } catch (e) {
+    const hint = e.message.startsWith('401') ? '. The API key is missing or not valid.' : '';
+    lastSignature = null;
+    body.innerHTML = '<tr><td colspan="7" class="err">Could not load alerts: ' +
+      esc(e.message) + hint + '</td></tr>';
+  }
+}
+
+async function openAlert(id) {
+  selectedId = id;
+  const card = document.getElementById('detailCard');
+  const el = document.getElementById('detail');
+  card.style.display = '';
+  el.innerHTML = '<span class="note">loading</span>';
+
+  try {
+    const d = await get('/api/soc/alerts/' + id);
+    const a = d.alert, r = d.rule;
+
+    // The rule block is the traceability requirement made visible: from the
+    // alert, to the rule that raised it, to the events it counted.
+    const ruleBlock = r ? `
+      <div class="note" style="text-transform:uppercase; letter-spacing:.05em; font-size:11px; margin-bottom:8px">
+        The rule that raised it</div>
+      <dl class="kv" style="grid-template-columns: 110px 1fr">
+        <dt>Rule</dt><dd class="mono">${esc(r.ruleId)}</dd>
+        <dt>Name</dt><dd>${esc(r.name)}</dd>
+        <dt>Purpose</dt><dd>${esc(r.purpose)}</dd>
+        <dt>Reads</dt><dd class="mono">${esc(r.inputEventTypes)}</dd>
+        <dt>Condition</dt><dd>${esc(r.condition)}</dd>
+        <dt>Window</dt><dd class="mono">${r.windowMinutes} min, threshold ${r.threshold}</dd>
+        <dt>Suppression</dt><dd class="mono">${r.suppressionMinutes} min</dd>
+        <dt>Threat</dt><dd class="mono">${esc(r.threatReference ?? 'none')}</dd>
+      </dl>` : '<span class="note">The rule record is no longer present.</span>';
+
+    el.innerHTML = `
+      <div class="row" style="align-items:flex-start">
+        <div style="flex:2">
+          <div style="margin-bottom:10px">${sevPill(a.severity)} ${stPill(a.status)}
+            <span class="mono note">${esc(a.alertId)}</span></div>
+          <div style="font-size:15px; margin-bottom:12px">${esc(a.description)}</div>
+          <dl class="kv">
+            <dt>Recommended action</dt><dd>${esc(a.recommendedAction)}</dd>
+            <dt>Affected service</dt><dd class="mono">${esc(a.affectedService ?? 'not attributed')}</dd>
+            <dt>Affected entity</dt><dd class="mono">${esc(a.affectedEntity ?? 'none')}</dd>
+            <dt>Source address</dt><dd class="mono">${esc(a.sourceIp ?? 'not attributed')}</dd>
+            <dt>Merchant</dt><dd class="mono">${esc(a.affectedUserId ?? 'none')}</dd>
+            <dt>First seen</dt><dd class="mono">${dateTime(a.firstSeenAt)}</dd>
+            <dt>Last seen</dt><dd class="mono">${dateTime(a.lastSeenAt)}</dd>
+            <dt>Events counted</dt><dd class="mono">${a.eventCount}</dd>
+          </dl>
+        </div>
+        <div style="flex:1">${ruleBlock}</div>
+      </div>
+
+      <div class="row tight" style="margin-top:14px; justify-content:flex-start">
+        <button class="ghost sm" onclick="setStatus('${a.alertId}','ACKNOWLEDGED')">Acknowledge</button>
+        <button class="ghost sm" onclick="setStatus('${a.alertId}','CLOSED')">Close</button>
+        <button class="ghost sm" onclick="hideDetail()">Hide</button>
+        <span style="flex:4"></span>
+      </div>
+      <div class="note" id="triageLog" style="margin-top:8px"></div>
+
+      <div class="note" style="text-transform:uppercase; letter-spacing:.05em; font-size:11px; margin:16px 0 6px">
+        The ${d.events.length} event${d.events.length === 1 ? '' : 's'} behind this alert</div>
+      <table>
+        <thead><tr>
+          <th class="nowrap">Time</th><th>Type</th><th>Severity</th><th>Service</th>
+          <th>Source</th><th>Endpoint</th><th>Correlation</th>
+        </tr></thead>
+        <tbody>${d.events.map(e => `
+          <tr>
+            <td class="mono nowrap">${time(e.timestamp)}</td>
+            <td class="mono">${esc(e.eventType)}</td>
+            <td>${sevPill(e.severity)}</td>
+            <td class="mono">${esc(e.serviceName)}</td>
+            <td class="mono">${esc(e.sourceIp ?? '-')}</td>
+            <td class="mono">${esc(e.httpMethod ?? '')} ${esc(e.endpoint ?? '-')}</td>
+            <td class="mono">${esc((e.correlationId ?? '').slice(0, 8))}</td>
+          </tr>`).join('')}</tbody>
+      </table>`;
+
+    loadAlerts();
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {
+    el.innerHTML = '<span class="err">Could not load the alert: ' + esc(e.message) + '</span>';
+  }
+}
+
+function hideDetail() {
+  selectedId = null;
+  document.getElementById('detailCard').style.display = 'none';
+  loadAlerts();
+}
+
+async function setStatus(id, status) {
+  try {
+    const res = await fetch(API + '/api/soc/alerts/' + id + '/status', {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ status })
+    });
+    if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+    openAlert(id);
+  } catch (e) {
+    note('triageLog', 'Could not update: ' + e.message, 'err');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Events and the counts strip
+// ---------------------------------------------------------------------------
+async function loadEvents() {
+  const body = document.getElementById('eventRows');
+  try {
+    const page = await get('/api/soc/events?pageSize=15');
+    body.innerHTML = page.items.length ? page.items.map(e => `
+      <tr>
+        <td class="mono nowrap">${time(e.timestamp)}</td>
+        <td class="mono">${esc(e.eventType)}</td>
+        <td>${sevPill(e.severity)}</td>
+        <td class="mono">${esc(e.serviceName)}</td>
+        <td class="mono">${esc(e.sourceIp ?? '-')}</td>
+        <td>${esc(e.message ?? '')}</td>
+      </tr>`).join('')
+      : '<tr><td colspan="6" class="note">no events collected yet</td></tr>';
+  } catch (e) {
+    body.innerHTML = '<tr><td colspan="6" class="err">Could not load events: ' +
+      esc(e.message) + '</td></tr>';
+  }
+}
+
+async function loadSummary() {
+  try {
+    const s = await get('/api/soc/summary');
+    document.getElementById('sEvents').textContent = s.totalStored;
+  } catch { document.getElementById('sEvents').textContent = '-'; }
+}
+
+async function loadRules() {
+  try {
+    const rules = await get('/api/soc/rules');
+    document.getElementById('sRules').textContent = rules.filter(r => r.enabled).length;
+
+    const select = document.getElementById('fRule');
+    const current = select.value;
+    select.innerHTML = '<option value="">any</option>' + rules
+      .map(r => `<option value="${esc(r.ruleId)}">${esc(r.ruleId)}: ${esc(r.name)}</option>`).join('');
+    select.value = current;
+  } catch { document.getElementById('sRules').textContent = '-'; }
+}
+
+function refreshAll() {
+  loadSummary(); loadAlerts(); loadEvents();
+  document.getElementById('lastLoad').textContent =
+    'last refreshed ' + new Date().toLocaleTimeString('en-ZA', { hour12: false });
+}
+
+document.getElementById('apikey').value = getKey();
+document.getElementById('apikey').addEventListener('change', e => setKey(e.target.value.trim()));
+
+loadRules();
+refreshAll();
+
+// The rule engine evaluates every 20 seconds, so polling faster than that shows
+// the same answer twice. Ten seconds keeps the table feeling live during a
+// demonstration without doubling the request count for nothing.
+setInterval(() => { if (document.getElementById('auto').checked) refreshAll(); }, 10000);
+</script>
+
+</body>
+</html>

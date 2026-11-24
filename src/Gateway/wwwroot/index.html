@@ -4,152 +4,176 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Panda Pocket</title>
-  <style>
-    :root {
-      --bg: #0f1115; --panel: #171a21; --line: #262b36;
-      --ink: #e8eaed; --muted: #9aa4b2; --accent: #4ade80;
-      --warn: #fbbf24; --bad: #f87171; --info: #60a5fa;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0; padding: 24px; background: var(--bg); color: var(--ink);
-      font: 15px/1.5 ui-sans-serif, system-ui, "Segoe UI", sans-serif;
-    }
-    header { max-width: 1100px; margin: 0 auto 20px; }
-    h1 { margin: 0 0 4px; font-size: 22px; font-weight: 650; }
-    .sub { color: var(--muted); font-size: 13px; }
-    .wrap { max-width: 1100px; margin: 0 auto; display: grid; gap: 18px; grid-template-columns: 360px 1fr; }
-    @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; } }
-    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
-    .card h2 { margin: 0 0 12px; font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
-    label { display: block; margin: 10px 0 4px; font-size: 13px; color: var(--muted); }
-    input, select, button {
-      width: 100%; padding: 9px 10px; border-radius: 7px;
-      border: 1px solid var(--line); background: #0d0f14; color: var(--ink); font: inherit;
-    }
-    button {
-      margin-top: 14px; background: var(--accent); color: #06240f;
-      font-weight: 650; border: none; cursor: pointer;
-    }
-    button:hover { filter: brightness(1.08); }
-    button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); margin-top: 8px; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
-    th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
-    td.mono, .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
-    .pill { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-    .Pending { background: #1e3a5f; color: var(--info); }
-    .Underpaid { background: #4a3410; color: var(--warn); }
-    .Paid, .Settled { background: #14361f; color: var(--accent); }
-    .Expired, .Cancelled { background: #3d1d1d; color: var(--bad); }
-    .rates { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 4px; }
-    .rate { flex: 1; min-width: 120px; background: #0d0f14; border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
-    .rate .p { color: var(--muted); font-size: 11px; }
-    .rate .v { font-size: 16px; font-weight: 650; font-family: ui-monospace, Consolas, monospace; }
-    #log { margin-top: 10px; font-size: 12px; min-height: 18px; }
-    .ok { color: var(--accent); } .err { color: var(--bad); } .note { color: var(--muted); }
-    .row { display: flex; gap: 8px; align-items: center; }
-    .row > * { flex: 1; }
-    .countdown { font-family: ui-monospace, Consolas, monospace; }
-    .expiring { color: var(--warn); }
-  </style>
+  <link rel="stylesheet" href="app.css">
 </head>
 <body>
 
-<header>
-  <h1>Panda Pocket</h1>
-  <div class="sub">
-    Merchant crypto payment gateway. Every call on this page goes through the
-    API gateway on port 5000, never directly to a service.
-  </div>
-</header>
+<div class="shell">
 
-<div class="wrap">
-
-  <div>
-    <div class="card">
-      <h2>Live rates</h2>
-      <div class="rates" id="rates"><span class="note">loading…</span></div>
-      <div class="note mono" id="ratesAsOf"></div>
+<aside class="sidebar" id="sidebar">
+  <div class="brand">
+    <div class="brand-mark">PP</div>
+    <div>
+      <div class="brand-name">Panda Pocket</div>
+      <div class="brand-sub">Crypto payment gateway</div>
     </div>
+  </div>
 
-    <div class="card" style="margin-top:18px">
-      <h2>API key</h2>
-      <label for="apikey">X-API-Key sent with every invoice call</label>
-      <input id="apikey" type="text" spellcheck="false" class="mono">
-      <div class="note" style="margin-top:8px">
-        Stored in this browser only. In a real integration the key lives on the
-        merchant's server, never in a page: anything in client JavaScript is
-        readable by the customer. This field exists so the 401 is demonstrable.
+  <nav class="nav">
+    <div class="nav-label">Operate</div>
+    <a class="nav-item" href="/" aria-current="page">Home<span class="nav-hint">Merchant dashboard</span></a>
+
+    <div class="nav-label">Security operations</div>
+    <a class="nav-item" href="soc.html">SOC console<span class="nav-hint">Alerts, rules and events</span></a>
+    <a class="nav-item" href="ask.html">Ask the graph<span class="nav-hint">Answers with their evidence</span></a>
+  </nav>
+
+  <div class="sidebar-foot">
+    <label class="field-label" for="apikey">API key</label>
+    <input id="apikey" class="mono" spellcheck="false" autocomplete="off">
+    <button class="ghost sm" style="margin-top:9px" onclick="clearKey()">Clear key</button>
+    <div class="env"><span class="dot" id="healthDot"></span><span id="healthText">checking</span></div>
+  </div>
+</aside>
+
+<main class="main">
+  <header class="topbar">
+    <button class="hamburger ghost" onclick="PandaShell.toggleNav()" aria-label="Show navigation">
+      <span></span><span></span><span></span>
+    </button>
+    <div>
+      <h1 class="page-title">Merchant dashboard</h1>
+      <p class="page-sub">Invoices, settlement and webhook delivery. Every call on this page goes through the API gateway on port 5000, never directly to a service.</p>
+    </div>
+    <div class="topbar-actions"><span class="note mono" id="ratesTick"></span></div>
+  </header>
+
+  <div class="content">
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-label">Available balance</div>
+        <div class="stat-value" id="balAvailable">-</div>
+        <div class="stat-foot">settled, ready to pay out</div>
       </div>
-      <button class="ghost" onclick="clearKey()">Clear key (to see the 401)</button>
+      <div class="stat">
+        <div class="stat-label">Lifetime gross</div>
+        <div class="stat-value sm" id="balGross">-</div>
+        <div class="stat-foot">credited before fees</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Platform fees</div>
+        <div class="stat-value sm" id="balFees">-</div>
+        <div class="stat-foot">retained by the platform</div>
+      </div>
+      <div class="stat" style="grid-column: span 2">
+        <div class="stat-label">Live rates</div>
+        <div class="rates" id="rates" style="margin-top:9px"><span class="note">loading</span></div>
+        <div class="stat-foot mono" id="ratesAsOf"></div>
+      </div>
     </div>
 
-    <div class="card" style="margin-top:18px">
-      <h2>Create invoice</h2>
-      <label for="amount">Amount (ZAR)</label>
-      <input id="amount" type="number" value="250" min="1" step="0.01">
+    <div class="grid">
 
-      <label for="reference">Your reference</label>
-      <input id="reference" type="text" value="">
+      <div>
+        <div class="card">
+          <div class="card-head"><h2>Create invoice</h2></div>
+          <div class="card-body">
+            <div class="field">
+              <label for="amount">Amount in rand</label>
+              <input id="amount" type="number" value="250" min="1" step="0.01" class="mono">
+            </div>
+            <div class="field">
+              <label for="reference">Your reference</label>
+              <input id="reference" type="text" placeholder="generated if left empty">
+            </div>
+            <div class="field">
+              <label for="asset">Asset</label>
+              <select id="asset">
+                <option value="BTC">BTC</option>
+                <option value="ETH">ETH</option>
+                <option value="USDT">USDT</option>
+              </select>
+            </div>
+            <button style="margin-top:15px" onclick="createInvoice()">Create invoice</button>
+            <button class="ghost" onclick="refresh()">Refresh list</button>
+            <div id="log" style="margin-top:11px; font-size:12px; min-height:18px"></div>
+          </div>
+          <div class="card-note">
+            The key in the sidebar is sent with every call on this page. In a real
+            integration it lives on the merchant's server, never in a page a customer
+            can read. It is here so the 401 can be demonstrated.
+          </div>
+        </div>
+      </div>
 
-      <label for="asset">Asset</label>
-      <select id="asset">
-        <option value="BTC">BTC</option>
-        <option value="ETH">ETH</option>
-        <option value="USDT">USDT</option>
-      </select>
+      <div>
+        <div class="card">
+          <div class="card-head">
+            <h2>Invoices</h2>
+            <div class="right note">newest fifteen</div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Reference</th><th>Amount</th><th>Crypto</th>
+                  <th>Status</th><th>Expires in</th><th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="rows">
+                <tr><td colspan="6" class="note">loading</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-      <button onclick="createInvoice()">Create invoice</button>
-      <button class="ghost" onclick="refresh()">Refresh list</button>
-      <div id="log"></div>
+        <div class="card">
+          <div class="card-head">
+            <h2>Rand ledger</h2>
+            <div class="right note" id="reconcile"></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Type</th><th>Amount</th><th>Balance after</th><th>Description</th></tr>
+              </thead>
+              <tbody id="ledgerRows">
+                <tr><td colspan="4" class="note">no entries yet</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="card-note">
+            The balance above is a running total. The reconcile check recomputes it from
+            these entries on every read, which is how a month-old lost update was found.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Webhook deliveries</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Status</th><th>Attempts</th><th>Next attempt</th><th>Last error</th><th></th></tr>
+              </thead>
+              <tbody id="hookRows">
+                <tr><td colspan="5" class="note">no deliveries yet</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="card-note">
+            Failed deliveries are dead-lettered, not discarded. Retry requeues one.
+          </div>
+        </div>
+      </div>
+
     </div>
-  </div>
 
-  <div>
-  <div class="card">
-    <h2>Invoices</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Reference</th><th>Amount</th><th>Crypto</th>
-          <th>Status</th><th>Expires in</th><th>Actions</th>
-        </tr>
-      </thead>
-      <tbody id="rows">
-        <tr><td colspan="6" class="note">loading…</td></tr>
-      </tbody>
-    </table>
   </div>
-
-  <div class="card" style="margin-top:18px">
-    <h2>ZAR ledger</h2>
-    <div class="rates" style="margin-bottom:12px">
-      <div class="rate"><div class="p">AVAILABLE</div><div class="v" id="balAvailable">-</div></div>
-      <div class="rate"><div class="p">LIFETIME GROSS</div><div class="v" id="balGross">-</div></div>
-      <div class="rate"><div class="p">PLATFORM FEES</div><div class="v" id="balFees">-</div></div>
-    </div>
-    <table>
-      <thead><tr><th>Type</th><th>Amount</th><th>Balance after</th><th>Description</th></tr></thead>
-      <tbody id="ledgerRows"><tr><td colspan="4" class="note">no entries yet</td></tr></tbody>
-    </table>
-    <div class="note" id="reconcile" style="margin-top:10px"></div>
-  </div>
-
-  <div class="card" style="margin-top:18px">
-    <h2>Webhook deliveries</h2>
-    <table>
-      <thead><tr><th>Status</th><th>Attempts</th><th>Next attempt</th><th>Last error</th><th></th></tr></thead>
-      <tbody id="hookRows"><tr><td colspan="5" class="note">no deliveries yet</td></tr></tbody>
-    </table>
-    <div class="note" style="margin-top:10px">
-      Failed deliveries are dead-lettered, not discarded. Retry requeues one.
-    </div>
-  </div>
-  </div>
+</main>
 
 </div>
 
+<script src="app.js"></script>
 <script>
 // Same origin: the gateway serves this page and routes the API, so no CORS and
 // no hard-coded host. Opening the gateway on any machine gives a working client.

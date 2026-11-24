@@ -57,6 +57,9 @@ builder.Services.AddServiceRegistry(builder.Configuration);
 // down or fail the request that produced the event.
 builder.Services.AddSocEvents(builder.Configuration);
 
+// Singleton, because it is a de-duplication window shared by every request.
+// Scoped would reset it per call, which is the same as not having it.
+builder.Services.AddSingleton<ReconcileStateLog>();
 builder.Services.AddScoped<SettlementService>();
 builder.Services.AddHostedService<WebhookDispatcher>();
 
