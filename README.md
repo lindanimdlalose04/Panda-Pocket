@@ -6,6 +6,11 @@ exchange rate risk.
 
 Built for ITRI 623 (Databases 2), North-West University.
 
+It is built in two halves. The payment gateway itself, and a security layer on
+top of it that records what every service does, detects patterns in that record,
+and answers questions about it from a Neo4j knowledge graph. If you came here
+for the retrieval-augmented part, jump to [The security layer](#the-security-layer-soc-knowledge-graph-and-rag).
+
 ## Running it
 
 Prerequisites: .NET 8 SDK and Docker Desktop. Nothing else.
@@ -14,8 +19,11 @@ Prerequisites: .NET 8 SDK and Docker Desktop. Nothing else.
 docker compose up -d
 ```
 
-That brings up the three backing stores. Application services are added to the
-compose file as they are built.
+That brings up all twelve containers.
+
+One extra prerequisite for the question answering only: [Ollama](https://ollama.com)
+running on the host, with `ollama pull mxbai-embed-large` and `ollama pull llama3.2`.
+Everything else works without it.
 
 | Service      | URL                     | Notes                               |
 |--------------|-------------------------|-------------------------------------|
@@ -28,6 +36,11 @@ compose file as they are built.
 | Seq          | http://localhost:5341   | logs, auth disabled, see compose    |
 | Postgres     | `localhost:5432`        | see `infra/postgres/init.sql`       |
 | MongoDB      | `localhost:27018`       | `rate_svc` / `rate_pw_dev`          |
+| **SOC console** | http://localhost:5000/soc.html | alerts, rules and events     |
+| **Ask the graph** | http://localhost:5000/ask.html | questions, with evidence   |
+| SOC API      | http://localhost:5005   | `/swagger`, events and alerts       |
+| Graph API    | http://localhost:5006   | `/swagger`, the graph and the RAG   |
+| Neo4j        | http://localhost:7474   | Browser. Bolt on 7687, `neo4j` / `panda_graph_dev` |
 
 ### Seeded demo account
 
@@ -166,9 +179,11 @@ PandaPocket.sln
 │  │  ├─ Merchant.Api/        accounts, hashed API keys, webhook config
 │  │  ├─ Invoice.Api/         the payment lifecycle and state machine
 │  │  ├─ Rate.Api/            ZAR quotes and tick history
-│  │  └─ Settlement.Api/      ZAR ledger, fees, webhook dispatch
+│  │  ├─ Settlement.Api/      ZAR ledger, fees, webhook dispatch
+│  │  ├─ Soc.Api/             security events, detection rules, alerts
+│  │  └─ Graph.Api/           the knowledge graph and the RAG
 │  ├─ Shared/Contracts/       DTOs, SOC event schema, correlation headers
-│  └─ client/                 plain HTML plus fetch, no build step
+│  └─ Gateway/wwwroot/        plain HTML plus fetch, no build step
 ├─ infra/postgres/init.sql    database and role bootstrap
 ├─ requests/                  .http files, doubling as API documentation
 ├─ docs/                      diagrams and report
@@ -363,9 +378,163 @@ curl http://localhost:5003/api/rates/BTCZAR/history  # 503 with Retry-After
 docker compose start mongo                    # recovers on its own, no restart
 ```
 
+## The security layer: SOC, knowledge graph and RAG
+
+The payment gateway above is the thing being watched. This half is the watching.
+
+Three steps. Every service **records** what it does as a security event. A rule
+engine **detects** patterns across those events and raises alerts. A knowledge
+graph **connects** those alerts to published security knowledge, and a retrieval
+layer answers questions about them in English, with the evidence attached.
+
+The design rule that shapes all of it: the security layer is downstream of
+everything and upstream of nothing. No payment service ever calls it, so it can
+never delay or block a payment.
+
+### Seeing it work
+
+```powershell
+.\infra\reset-for-demo.ps1      # clears the evidence, keeps the payment data
+.\infra\simulate-attacks.ps1    # about two minutes
+```
+
+The simulator attacks the running system through its public interface: wrong API
+keys, guessed checkout links, failed logins followed by a payout change, a real
+outage of the rate service, and a flood past the rate limit. Nothing is inserted
+into the database. Open http://localhost:5000/soc.html and six alerts appear,
+one per rule, each one traceable to the events behind it.
+
+Then build the graph from what just happened and ask it something:
+
+```bash
+curl -X POST http://localhost:5006/api/graph/load/all
+```
+
+Open http://localhost:5000/ask.html and try *What is the impact if the rate
+service fails?*, then *How do I tell whether someone actually got in?*. Those two
+questions are answered by different retrieval routes, which is the whole reason
+there is more than one.
+
+### Where the code is
+
+Worth reading in this order.
+
+| Step | File |
+|---|---|
+| An event is written | `src/Services/Invoice.Api/Domain/InvoiceService.cs` |
+| It is queued and shipped | `src/Shared/Contracts/Soc/SocEventPublisher.cs` |
+| It is received and stored | `src/Services/Soc.Api/Endpoints/SocEndpoints.cs` |
+| A rule turns events into an alert | `src/Services/Soc.Api/Domain/Detection/DetectionRules.cs` |
+| The rule engine and suppression | `src/Services/Soc.Api/Domain/Detection/RuleEngine.cs` |
+| Neo4j connection and schema | `src/Services/Graph.Api/Program.cs`, `Graph/GraphSchema.cs` |
+| The three graph sources | `Graph/TopologyLoader.cs`, `Graph/SocLoader.cs`, `Graph/KnowledgeSeed.cs` |
+| **Retrieval, the three routes** | `src/Services/Graph.Api/Rag/Retriever.cs` |
+| **The evidence envelope** | `src/Services/Graph.Api/Rag/EvidenceEnvelope.cs` |
+| Retrieve then generate | `src/Services/Graph.Api/Rag/AnswerService.cs` |
+| How it was scored | `src/Services/Graph.Api/Rag/Evaluation/` |
+
+### What the graph is built from
+
+Three sources, and two of them are read from the running system rather than
+typed by hand.
+
+**The system's own structure.** Services and their health come from the Consul
+registry. Endpoints come from the gateway's own routing file, mounted read-only
+into the container, so the graph cannot describe a route the gateway does not
+have. Stop a service and the next load records it as absent.
+
+**The security events and alerts**, read from the SOC service over HTTP. The
+graph has no access to anyone's database.
+
+**The security knowledge**, which is the one part a human wrote: six threats,
+four CWE references, six controls and three written response procedures. MITRE
+and OWASP publish what credential stuffing is; they know nothing about this
+system, so somebody has to connect the two. Each control records whether this
+system actually has it, which is how the graph can say what is *not* implemented.
+
+Order matters when loading. The knowledge joins alerts to the threats they
+indicate through the rules that detect them, so it has to load after the rules
+and alerts exist. Use `/load/all`, which does them in the right order.
+
+### The retrieval, honestly described
+
+Three routes, because each one answers questions the others cannot.
+
+**Cypher** matches a question against five known shapes and runs a prepared graph
+query. Exact and fast, and useless for anything it does not recognise.
+
+**Vector search** embeds the question with `mxbai-embed-large` and compares it
+against the procedure text, chunked by paragraph and indexed by a Neo4j vector
+index at 1024 dimensions with cosine similarity. This is what finds the right
+paragraph for *how do I tell whether someone actually got in*, which shares
+almost no words with the text that answers it.
+
+**Hybrid** uses the vector search to find a starting point, then walks the typed
+relationships out from there to the threat, the controls and any alert this
+system actually raised.
+
+Measured over eight questions whose correct answers were written down before
+anything ran:
+
+| Route | Evidence recall | Latency | Fabricated citations |
+|---|---|---|---|
+| Cypher | 56% | 23 ms | 0 |
+| Vector | 29% | 263 ms | 0 |
+| Hybrid | **64%** | 313 ms | 0 |
+
+That last column is the one that matters. Every identifier in every answer is
+checked against the graph, so a citation to something that does not exist would
+be caught. There were none.
+
+**Generation is the smaller half, and the template is the default.** The answer
+is assembled from the retrieved evidence by a template rather than written by a
+language model. Both are implemented and both were measured on the same question
+with the same evidence: the template finished in 37 ms with all three sections,
+`llama3.2` took 107 seconds and silently dropped two of them. The model is still
+there behind `"useModel": true`, and it answers through the graph service
+directly because it takes longer than the gateway will wait:
+
+```bash
+curl -X POST http://localhost:5006/api/graph/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Why was the critical alert raised?","useModel":true}'
+```
+
+A template cannot hallucinate, because it has no way to produce a sentence that
+was not assembled from retrieved facts. That is the trade: fluency for
+guaranteed grounding. On better hardware the balance might go the other way, and
+the report says so.
+
+### Every answer carries its evidence
+
+Retrieval decides what is true; generation only decides how to say it. So every
+answer comes back with the envelope it was built from: which nodes, with how
+closely each matched, which relationships were walked, which passage was quoted
+with its document and revision, and the Cypher that ran.
+
+This is not decoration. An early answer confidently described CWE-307 as "a
+reference weakness type", which is nonsense. A status label had been put where
+the name belonged, and both the template and the model repeated it faithfully,
+because both were told to use only what they were given. Nothing could have
+caught that by reading the prose. The only way was to look at what had been
+retrieved.
+
+### What it does not do
+
+- It answers security questions. Ask it when the last matcha was sold and it
+  will reach for the nearest security evidence it has, because that is all it
+  holds. The evidence block makes that obvious at a glance.
+- The graph is not live. It reads the SOC service when told to, because the
+  build is expensive and the join only works on a complete picture.
+- Alerts can lag by up to twenty seconds, because the rules run on a timer.
+- The operator pages sit behind the ordinary merchant API key. There is no
+  separate operator role, so any merchant's key could read the alert feed.
+
 ## Design notes
 
-The decisions worth defending out loud are recorded in `CLAUDE.md`: why the
+The decisions worth defending out loud are recorded in the code itself, in a
+comment above the thing being explained rather than in a document that drifts
+away from it: why the
 rate feed is a local simulator rather than an external API, why `/cancel` is an
 action endpoint rather than a `PATCH`, why three different call types get three
 different resilience strategies, and why one Postgres container with three
